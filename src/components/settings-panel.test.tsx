@@ -37,4 +37,39 @@ describe('SettingsPanel', () => {
 
     expect(onSmoothingChange).toHaveBeenCalledWith(0.8)
   })
+
+  it('should show import VRM button when onVRMImport provided', () => {
+    const onVRMImport = vi.fn()
+    render(<SettingsPanel {...defaultProps} onVRMImport={onVRMImport} />)
+
+    expect(screen.getByTestId('import-vrm-button')).toBeDefined()
+  })
+
+  it('should not show import VRM button when onVRMImport not provided', () => {
+    render(<SettingsPanel {...defaultProps} />)
+
+    expect(screen.queryByTestId('import-vrm-button')).toBeNull()
+  })
+
+  it('should call onVRMImport when file selected', () => {
+    const onVRMImport = vi.fn()
+    render(<SettingsPanel {...defaultProps} onVRMImport={onVRMImport} />)
+
+    const fileInput = screen.getByTestId('vrm-file-input')
+    const file = new File(['vrm content'], 'avatar.vrm', { type: 'model/gltf-binary' })
+
+    Object.defineProperty(fileInput, 'files', { value: [file] })
+    fireEvent.change(fileInput)
+
+    expect(onVRMImport).toHaveBeenCalledWith(file)
+  })
+
+  it('should disable import button when vrmLoading is true', () => {
+    const onVRMImport = vi.fn()
+    render(<SettingsPanel {...defaultProps} onVRMImport={onVRMImport} vrmLoading={true} />)
+
+    const button = screen.getByTestId('import-vrm-button')
+    expect(button).toBeDisabled()
+    expect(button).toHaveTextContent('Loading...')
+  })
 })

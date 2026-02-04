@@ -4,6 +4,8 @@
  * SettingsPanel - Controls for tracking and display settings.
  */
 
+import { useRef } from 'react'
+
 export interface SettingsPanelProps {
   smoothing: number
   onSmoothingChange: (value: number) => void
@@ -13,6 +15,10 @@ export interface SettingsPanelProps {
   onPoseTrackingChange: (enabled: boolean) => void
   handTrackingEnabled: boolean
   onHandTrackingChange: (enabled: boolean) => void
+  /** Optional: callback when a VRM file is selected for import */
+  onVRMImport?: (file: File) => void
+  /** Optional: whether VRM is currently loading */
+  vrmLoading?: boolean
 }
 
 export function SettingsPanel({
@@ -24,10 +30,60 @@ export function SettingsPanel({
   onPoseTrackingChange,
   handTrackingEnabled,
   onHandTrackingChange,
+  onVRMImport,
+  vrmLoading = false,
 }: SettingsPanelProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file && onVRMImport) {
+      onVRMImport(file)
+    }
+    // Reset input so the same file can be selected again
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click()
+  }
+
   return (
     <div className="settings-panel" style={{ padding: '1rem' }}>
       <h3>Settings</h3>
+
+      {/* VRM Import Section */}
+      {onVRMImport && (
+        <div style={{ marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '1px solid #444' }}>
+          <h4 style={{ marginTop: 0, marginBottom: '0.5rem' }}>Avatar</h4>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".vrm,.glb"
+            onChange={handleFileChange}
+            style={{ display: 'none' }}
+            data-testid="vrm-file-input"
+          />
+          <button
+            onClick={handleImportClick}
+            disabled={vrmLoading}
+            style={{
+              width: '100%',
+              padding: '0.5rem 1rem',
+              cursor: vrmLoading ? 'not-allowed' : 'pointer',
+              opacity: vrmLoading ? 0.6 : 1,
+            }}
+            data-testid="import-vrm-button"
+          >
+            {vrmLoading ? 'Loading...' : 'Import VRM'}
+          </button>
+          <p style={{ fontSize: '0.75rem', color: '#888', marginTop: '0.5rem' }}>
+            Supports .vrm and .glb files
+          </p>
+        </div>
+      )}
 
       <div style={{ marginBottom: '1rem' }}>
         <label htmlFor="smoothing">

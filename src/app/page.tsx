@@ -12,7 +12,7 @@ import { useSettingsStore } from '../stores/settings-store'
 import { useTrackingStore } from '../stores/tracking-store'
 
 export default function HomePage() {
-  const { vrm } = useVRMLoader()
+  const { vrm, loading: vrmLoading, loadFromFile } = useVRMLoader()
   const settings = useSettingsStore()
   const _tracking = useTrackingStore()
 
@@ -32,6 +32,8 @@ export default function HomePage() {
             onPoseTrackingChange={settings.setPoseTrackingEnabled}
             handTrackingEnabled={settings.handTrackingEnabled}
             onHandTrackingChange={settings.setHandTrackingEnabled}
+            onVRMImport={loadFromFile}
+            vrmLoading={vrmLoading}
           />
         </aside>
       </main>
