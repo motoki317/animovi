@@ -15,4 +15,20 @@ describe('KalmanFilter', () => {
     expect(smoothed).toBeGreaterThan(0)
     expect(smoothed).toBeLessThan(10)
   })
+
+  it('should track faster with higher responsiveness', () => {
+    const slowFilter = new KalmanFilter({ responsiveness: 0.2 })
+    const fastFilter = new KalmanFilter({ responsiveness: 0.8 })
+
+    // Initialize both
+    slowFilter.update(0)
+    fastFilter.update(0)
+
+    // Update with same value
+    const slowResult = slowFilter.update(10)
+    const fastResult = fastFilter.update(10)
+
+    // Higher responsiveness should track closer to new value
+    expect(fastResult).toBeGreaterThan(slowResult)
+  })
 })
