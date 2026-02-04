@@ -17,6 +17,13 @@ export interface DebugData {
     faceLandmarkCount: number
     poseLandmarkCount: number
   }
+  /** Raw pose landmark positions for debugging IK */
+  rawPose?: {
+    leftShoulder?: { x: number; y: number; z: number }
+    rightShoulder?: { x: number; y: number; z: number }
+    leftWrist?: { x: number; y: number; z: number }
+    rightWrist?: { x: number; y: number; z: number }
+  }
   solved: HolisticResult | null
   performance: {
     fps: number

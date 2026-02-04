@@ -198,25 +198,34 @@ export function solveTwoBoneIK(input: TwoBoneIKInput): TwoBoneIKResult {
   // VRM T-pose: arms point along ±X axis
   // We need to find rotations that take the arm from T-pose to upperArmDir
 
-  // For MediaPipe coordinate space (same as we're working in):
-  // - Y increases downward, Z is depth (negative = toward camera)
-  // - Need to convert to VRM coordinate system
+  // === Convert IK result to VRM Euler angles ===
+  //
+  // VRM coordinate system: Y-up, right-handed
+  // - T-pose: arms point along ±X axis (horizontal)
+  // - Shoulder rotations: X=forward/back, Y=twist, Z=up/down
+  //
+  // MediaPipe coordinate system:
+  // - X: 0-1, left to right (mirrored)
+  // - Y: 0-1, top to bottom (down is positive)
+  // - Z: depth, negative = closer to camera
+  //
+  // We compute rotations from the upperArmDir which points from shoulder to elbow target.
 
-  // Shoulder Z rotation: how much arm is raised/lowered from horizontal
-  // In our coordinate system, Y-down means arm pointing down
+  // Shoulder Z rotation: how much arm is raised/lowered from horizontal T-pose
+  // upperArmDir.y > 0 means arm pointing down (MediaPipe Y increases downward)
   const armDownAmount = upperArmDir.y // -1 (up) to +1 (down)
   const shoulderZ = isLeft
-    ? armDownAmount * (Math.PI / 2) // Left arm: down = positive Z
-    : -armDownAmount * (Math.PI / 2) // Right arm: down = negative Z
+    ? armDownAmount * (Math.PI / 2) // Left arm: positive Z lowers arm
+    : -armDownAmount * (Math.PI / 2) // Right arm: negative Z lowers arm
 
   // Shoulder X rotation: how much arm is forward/backward
-  // Negative Z = closer to camera = arm forward
-  const armForwardAmount = -upperArmDir.z
-  const shoulderX = armForwardAmount * (Math.PI / 3) // Limit to 60 degrees
+  // upperArmDir.z < 0 means arm forward (closer to camera)
+  // Allow full 90 degrees of forward motion
+  const armForwardAmount = -upperArmDir.z // positive = forward
+  const shoulderX = armForwardAmount * (Math.PI / 2) // Full 90 degrees range
 
-  // Shoulder Y rotation (twist): determined by elbow direction relative to arm
-  // This is more complex - depends on where the elbow actually is in the plane
-  // For now, use the pole hint to determine twist
+  // Shoulder Y rotation (twist): determined by elbow/bend direction
+  // This controls where the elbow points (e.g., down vs out vs back)
   const shoulderY = Math.atan2(-bendDir.z, bendDir.y) * (isLeft ? 1 : -1)
   const clampedShoulderY = clamp(shoulderY, -Math.PI / 2, Math.PI / 2)
 

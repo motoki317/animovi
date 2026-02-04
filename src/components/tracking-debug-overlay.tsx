@@ -260,6 +260,27 @@ export const TrackingDebugOverlay = memo(function TrackingDebugOverlay() {
             </div>
           )}
 
+          {/* Raw Pose Landmarks (for debugging IK) */}
+          {debugData?.rawPose && (
+            <div style={sectionStyle}>
+              <div style={{ fontSize: '10px', color: '#888', marginBottom: '4px' }}>
+                Raw Pose (MediaPipe)
+              </div>
+              <div style={{ marginBottom: '4px' }}>
+                <span style={{ color: '#888' }}>L.Wrist: </span>
+                <ValueDisplay label="X" value={debugData.rawPose.leftWrist?.x} precision={3} />
+                <ValueDisplay label="Y" value={debugData.rawPose.leftWrist?.y} precision={3} />
+                <ValueDisplay label="Z" value={debugData.rawPose.leftWrist?.z} precision={3} />
+              </div>
+              <div>
+                <span style={{ color: '#888' }}>R.Wrist: </span>
+                <ValueDisplay label="X" value={debugData.rawPose.rightWrist?.x} precision={3} />
+                <ValueDisplay label="Y" value={debugData.rawPose.rightWrist?.y} precision={3} />
+                <ValueDisplay label="Z" value={debugData.rawPose.rightWrist?.z} precision={3} />
+              </div>
+            </div>
+          )}
+
           {/* Solved Values - Hands */}
           {(debugData?.solved?.leftHand || debugData?.solved?.rightHand) && (
             <div>

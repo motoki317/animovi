@@ -83,6 +83,16 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
     // Read fresh from store to avoid stale closure issues
     const { debugEnabled, setDebugData } = useTrackingStore.getState()
     if (!debugEnabled) return
+
+    // Extract raw pose landmarks for debugging IK
+    const poseLandmarks = mediaPipeResult?.poseLandmarks?.[0]
+    const rawPose = poseLandmarks ? {
+      leftShoulder: poseLandmarks[11] ? { x: poseLandmarks[11].x, y: poseLandmarks[11].y, z: poseLandmarks[11].z } : undefined,
+      rightShoulder: poseLandmarks[12] ? { x: poseLandmarks[12].x, y: poseLandmarks[12].y, z: poseLandmarks[12].z } : undefined,
+      leftWrist: poseLandmarks[15] ? { x: poseLandmarks[15].x, y: poseLandmarks[15].y, z: poseLandmarks[15].z } : undefined,
+      rightWrist: poseLandmarks[16] ? { x: poseLandmarks[16].x, y: poseLandmarks[16].y, z: poseLandmarks[16].z } : undefined,
+    } : undefined
+
     setDebugData({
       pipelineState,
       detection: {
@@ -93,6 +103,7 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
         faceLandmarkCount: mediaPipeResult?.faceLandmarks?.[0]?.length ?? 0,
         poseLandmarkCount: mediaPipeResult?.poseLandmarks?.[0]?.length ?? 0,
       },
+      rawPose,
       solved,
       performance: {
         fps: elapsed > 0 ? 1000 / elapsed : 0,
