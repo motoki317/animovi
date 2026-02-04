@@ -26,6 +26,10 @@ vi.mock('../components/settings-panel', () => ({
   SettingsPanel: () => <div data-testid="settings-panel" />,
 }))
 
+vi.mock('../components/background-settings', () => ({
+  BackgroundSettings: () => <div data-testid="background-settings" />,
+}))
+
 vi.mock('../hooks/use-vrm-loader', () => ({
   useVRMLoader: () => ({
     vrm: null,
@@ -38,6 +42,7 @@ vi.mock('../hooks/use-vrm-loader', () => ({
 
 vi.mock('../stores/settings-store', () => ({
   useSettingsStore: () => ({
+    // Tracking settings
     smoothing: 0.5,
     faceTrackingEnabled: true,
     poseTrackingEnabled: true,
@@ -46,6 +51,24 @@ vi.mock('../stores/settings-store', () => ({
     setFaceTrackingEnabled: vi.fn(),
     setPoseTrackingEnabled: vi.fn(),
     setHandTrackingEnabled: vi.fn(),
+    // Background settings
+    backgroundType: 'solid',
+    backgroundColor: '#1a1a2e',
+    backgroundImageUrl: undefined,
+    setBackgroundType: vi.fn(),
+    setBackgroundColor: vi.fn(),
+    setBackgroundImageUrl: vi.fn(),
+    // Camera settings
+    cameraY: 1.3,
+    cameraZ: 1.5,
+    cameraAutoFrame: true,
+    setCameraY: vi.fn(),
+    setCameraZ: vi.fn(),
+    setCameraAutoFrame: vi.fn(),
+    // Panel visibility
+    panelVisible: true,
+    setPanelVisible: vi.fn(),
+    togglePanel: vi.fn(),
   }),
 }))
 
@@ -79,5 +102,11 @@ describe('HomePage', () => {
     render(<HomePage />)
 
     expect(screen.getByTestId('camera-provider')).toBeInTheDocument()
+  })
+
+  it('should render BackgroundSettings component', () => {
+    render(<HomePage />)
+
+    expect(screen.getByTestId('background-settings')).toBeInTheDocument()
   })
 })

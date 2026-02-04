@@ -35,6 +35,7 @@ const PRESET_COLORS = [
   { name: 'Black', color: '#000000' },
   { name: 'Green', color: '#00ff00' },
   { name: 'Blue', color: '#0000ff' },
+  { name: 'Red', color: '#ff0000' },
   { name: 'Gray', color: '#808080' },
 ]
 

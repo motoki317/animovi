@@ -4,27 +4,91 @@
  * AvatarScene - Three.js canvas for VRM avatar rendering.
  */
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useCallback } from 'react'
 import * as THREE from 'three'
 import type { VRM } from '@pixiv/three-vrm'
+import type { BackgroundType } from './background-settings'
 
 interface AvatarSceneProps {
   vrm?: VRM | null
+  backgroundType?: BackgroundType
   backgroundColor?: string
+  cameraY?: number
+  cameraZ?: number
+  autoFrameOnLoad?: boolean
+  onAutoFrame?: (y: number, z: number) => void
 }
 
-export function AvatarScene({ vrm, backgroundColor = '#1a1a2e' }: AvatarSceneProps) {
+export function AvatarScene({
+  vrm,
+  backgroundType = 'solid',
+  backgroundColor = '#1a1a2e',
+  cameraY = 1.3,
+  cameraZ = 1.5,
+  autoFrameOnLoad = true,
+  onAutoFrame,
+}: AvatarSceneProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
   const sceneRef = useRef<THREE.Scene | null>(null)
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null)
+
+  // Auto-frame to VRM head position
+  const autoFrameToHead = useCallback((vrmModel: VRM) => {
+    if (!cameraRef.current) return
+
+    try {
+      // Try to get head bone position
+      const headBone = vrmModel.humanoid?.getNormalizedBoneNode('head')
+      if (headBone) {
+        const headPos = new THREE.Vector3()
+        headBone.getWorldPosition(headPos)
+
+        // Position camera to look at head with some offset
+        const newY = headPos.y
+        const newZ = 1.5 // Keep default distance
+
+        cameraRef.current.position.y = newY
+        cameraRef.current.position.z = newZ
+        cameraRef.current.lookAt(0, newY, 0)
+
+        if (onAutoFrame) {
+          onAutoFrame(newY, newZ)
+        }
+        return
+      }
+
+      // Fallback: use bounding box center
+      const box = new THREE.Box3().setFromObject(vrmModel.scene)
+      const center = box.getCenter(new THREE.Vector3())
+      const size = box.getSize(new THREE.Vector3())
+
+      // Position camera to see the upper body/head
+      const newY = center.y + size.y * 0.2
+      const newZ = Math.max(1.5, size.y * 0.8)
+
+      cameraRef.current.position.y = newY
+      cameraRef.current.position.z = newZ
+      cameraRef.current.lookAt(0, newY, 0)
+
+      if (onAutoFrame) {
+        onAutoFrame(newY, newZ)
+      }
+    } catch {
+      // Silently fail - keep current camera position
+    }
+  }, [onAutoFrame])
 
   useEffect(() => {
     if (!containerRef.current) return
 
     // Initialize scene
     const scene = new THREE.Scene()
-    scene.background = new THREE.Color(backgroundColor)
+    if (backgroundType === 'transparent') {
+      scene.background = null
+    } else {
+      scene.background = new THREE.Color(backgroundColor)
+    }
     sceneRef.current = scene
 
     // Initialize camera
@@ -34,13 +98,20 @@ export function AvatarScene({ vrm, backgroundColor = '#1a1a2e' }: AvatarScenePro
       0.1,
       20
     )
-    camera.position.set(0, 1.3, 1.5)
+    camera.position.set(0, cameraY, cameraZ)
+    camera.lookAt(0, cameraY, 0)
     cameraRef.current = camera
 
     // Initialize renderer
-    const renderer = new THREE.WebGLRenderer({ antialias: true })
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: backgroundType === 'transparent',
+    })
     renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight)
     renderer.setPixelRatio(window.devicePixelRatio)
+    if (backgroundType === 'transparent') {
+      renderer.setClearColor(0x000000, 0)
+    }
     containerRef.current.appendChild(renderer.domElement)
     rendererRef.current = renderer
 
@@ -77,7 +148,34 @@ export function AvatarScene({ vrm, backgroundColor = '#1a1a2e' }: AvatarScenePro
       renderer.dispose()
       containerRef.current?.removeChild(renderer.domElement)
     }
-  }, [backgroundColor])
+  }, [backgroundType, backgroundColor, cameraY, cameraZ])
+
+  // Update camera position when props change
+  useEffect(() => {
+    if (cameraRef.current) {
+      cameraRef.current.position.y = cameraY
+      cameraRef.current.position.z = cameraZ
+      cameraRef.current.lookAt(0, cameraY, 0)
+    }
+  }, [cameraY, cameraZ])
+
+  // Update background when props change
+  useEffect(() => {
+    if (sceneRef.current) {
+      if (backgroundType === 'transparent') {
+        sceneRef.current.background = null
+      } else {
+        sceneRef.current.background = new THREE.Color(backgroundColor)
+      }
+    }
+    if (rendererRef.current) {
+      if (backgroundType === 'transparent') {
+        rendererRef.current.setClearColor(0x000000, 0)
+      } else {
+        rendererRef.current.setClearColor(0x000000, 1)
+      }
+    }
+  }, [backgroundType, backgroundColor])
 
   // Add/remove VRM from scene
   useEffect(() => {
@@ -85,6 +183,11 @@ export function AvatarScene({ vrm, backgroundColor = '#1a1a2e' }: AvatarScenePro
 
     if (vrm?.scene) {
       sceneRef.current.add(vrm.scene)
+
+      // Auto-frame to head position when VRM loads
+      if (autoFrameOnLoad) {
+        autoFrameToHead(vrm)
+      }
     }
 
     return () => {
@@ -92,7 +195,7 @@ export function AvatarScene({ vrm, backgroundColor = '#1a1a2e' }: AvatarScenePro
         sceneRef.current.remove(vrm.scene)
       }
     }
-  }, [vrm])
+  }, [vrm, autoFrameOnLoad, autoFrameToHead])
 
   return (
     <div

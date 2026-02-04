@@ -25,6 +25,13 @@ describe('useSettingsStore', () => {
       faceTrackingEnabled: true,
       poseTrackingEnabled: true,
       handTrackingEnabled: false,
+      backgroundType: 'solid',
+      backgroundColor: '#1a1a2e',
+      backgroundImageUrl: undefined,
+      cameraY: 1.3,
+      cameraZ: 1.5,
+      cameraAutoFrame: true,
+      panelVisible: true,
     })
   })
 
@@ -47,5 +54,33 @@ describe('useSettingsStore', () => {
     useSettingsStore.getState().setFaceTrackingEnabled(false)
 
     expect(useSettingsStore.getState().faceTrackingEnabled).toBe(false)
+  })
+
+  it('should update background settings', () => {
+    useSettingsStore.getState().setBackgroundType('transparent')
+    useSettingsStore.getState().setBackgroundColor('#00ff00')
+
+    const state = useSettingsStore.getState()
+    expect(state.backgroundType).toBe('transparent')
+    expect(state.backgroundColor).toBe('#00ff00')
+  })
+
+  it('should update camera settings', () => {
+    useSettingsStore.getState().setCameraY(1.5)
+    useSettingsStore.getState().setCameraZ(2.0)
+    useSettingsStore.getState().setCameraAutoFrame(false)
+
+    const state = useSettingsStore.getState()
+    expect(state.cameraY).toBe(1.5)
+    expect(state.cameraZ).toBe(2.0)
+    expect(state.cameraAutoFrame).toBe(false)
+  })
+
+  it('should toggle panel visibility', () => {
+    useSettingsStore.getState().setPanelVisible(false)
+    expect(useSettingsStore.getState().panelVisible).toBe(false)
+
+    useSettingsStore.getState().togglePanel()
+    expect(useSettingsStore.getState().panelVisible).toBe(true)
   })
 })
