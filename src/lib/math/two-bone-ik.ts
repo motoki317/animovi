@@ -194,45 +194,89 @@ export function solveTwoBoneIK(input: TwoBoneIKInput): TwoBoneIKResult {
   const sinOffset = Math.sin(shoulderOffset)
   const upperArmDir = add(scale(targetDir, cosOffset), scale(bendDir, sinOffset))
 
-  // === Convert to Euler angles for VRM ===
-  // VRM T-pose: arms point along ±X axis
-  // We need to find rotations that take the arm from T-pose to upperArmDir
-
-  // === Convert IK result to VRM Euler angles ===
+  // === Convert upperArmDir to VRM Euler angles using proper rotation math ===
   //
-  // VRM coordinate system: Y-up, right-handed
-  // - T-pose: arms point along ±X axis (horizontal)
-  // - Shoulder rotations: X=forward/back, Y=twist, Z=up/down
+  // VRM T-pose: arms point along ±X axis (horizontal)
+  // We need the rotation that takes the T-pose direction to upperArmDir
   //
-  // MediaPipe coordinate system:
-  // - X: 0-1, left to right (mirrored)
-  // - Y: 0-1, top to bottom (down is positive)
-  // - Z: depth, negative = closer to camera
-  //
-  // We compute rotations from the upperArmDir which points from shoulder to elbow target.
+  // This uses axis-angle → quaternion → Euler conversion for accuracy.
+  // Linear component mapping only works for small angles and produces
+  // wrong results for larger arm movements.
 
-  // Shoulder Z rotation: how much arm is raised/lowered from horizontal T-pose
-  // upperArmDir.y > 0 means arm pointing down (MediaPipe Y increases downward)
-  const armDownAmount = upperArmDir.y // -1 (up) to +1 (down)
-  const shoulderZ = isLeft
-    ? armDownAmount * (Math.PI / 2) // Left arm: positive Z lowers arm
-    : -armDownAmount * (Math.PI / 2) // Right arm: negative Z lowers arm
+  // T-pose arm direction in VRM/MediaPipe space
+  // Note: In mirrored view, person's left arm appears on right side of screen
+  // MediaPipe X increases left-to-right, so left arm points toward higher X (positive)
+  // and right arm points toward lower X (negative) when in T-pose
+  const tposeDir: Vector3 = isLeft ? { x: 1, y: 0, z: 0 } : { x: -1, y: 0, z: 0 }
 
-  // Shoulder X rotation: how much arm is forward/backward
-  // upperArmDir.z < 0 means arm forward (closer to camera)
-  // Allow full 90 degrees of forward motion
-  const armForwardAmount = -upperArmDir.z // positive = forward
-  const shoulderX = armForwardAmount * (Math.PI / 2) // Full 90 degrees range
+  // Calculate axis-angle rotation from T-pose to target direction
+  const dotProduct = dot(tposeDir, upperArmDir)
+  const crossProduct = cross(tposeDir, upperArmDir)
+  const crossLen = length(crossProduct)
 
-  // Shoulder Y rotation (twist): determined by elbow/bend direction
-  // This controls where the elbow points (e.g., down vs out vs back)
-  const shoulderY = Math.atan2(-bendDir.z, bendDir.y) * (isLeft ? 1 : -1)
-  const clampedShoulderY = clamp(shoulderY, -Math.PI / 2, Math.PI / 2)
+  let shoulderX = 0
+  let shoulderY = 0
+  let shoulderZ = 0
+
+  if (crossLen < 0.001) {
+    // Vectors are parallel (same direction or opposite)
+    if (dotProduct > 0) {
+      // Same direction - no rotation needed (arm at T-pose)
+      shoulderX = 0
+      shoulderY = 0
+      shoulderZ = 0
+    } else {
+      // Opposite direction - 180° rotation around an arbitrary perpendicular axis
+      // For arms, rotating 180° around Y would flip the arm
+      shoulderX = 0
+      shoulderY = 0
+      shoulderZ = isLeft ? Math.PI : -Math.PI
+    }
+  } else {
+    // General case: compute rotation via quaternion
+    const axis = normalize(crossProduct)
+    const angle = Math.acos(clamp(dotProduct, -1, 1))
+
+    // Axis-angle to quaternion
+    const halfAngle = angle / 2
+    const sinHalf = Math.sin(halfAngle)
+    const cosHalf = Math.cos(halfAngle)
+    const qx = axis.x * sinHalf
+    const qy = axis.y * sinHalf
+    const qz = axis.z * sinHalf
+    const qw = cosHalf
+
+    // Quaternion to Euler angles (XYZ order, which Three.js uses by default)
+    // Reference: https://www.euclideanspace.com/maths/geometry/rotations/conversions/quaternionToEuler/
+
+    // Roll (X-axis rotation)
+    const sinr_cosp = 2 * (qw * qx + qy * qz)
+    const cosr_cosp = 1 - 2 * (qx * qx + qy * qy)
+    shoulderX = Math.atan2(sinr_cosp, cosr_cosp)
+
+    // Pitch (Y-axis rotation)
+    const sinp = 2 * (qw * qy - qz * qx)
+    if (Math.abs(sinp) >= 1) {
+      // Gimbal lock - use 90 degrees
+      shoulderY = (Math.PI / 2) * Math.sign(sinp)
+    } else {
+      shoulderY = Math.asin(sinp)
+    }
+
+    // Yaw (Z-axis rotation)
+    const siny_cosp = 2 * (qw * qz + qx * qy)
+    const cosy_cosp = 1 - 2 * (qy * qy + qz * qz)
+    shoulderZ = Math.atan2(siny_cosp, cosy_cosp)
+  }
+
+  // Apply arm-side-specific adjustments if needed
+  // The quaternion conversion already handles the direction correctly
+  // based on the T-pose direction we specified
 
   return {
     shoulder: {
       x: shoulderX,
-      y: clampedShoulderY,
+      y: shoulderY,
       z: shoulderZ,
     },
     elbow: {

@@ -92,21 +92,29 @@ describe('Two-Bone IK Solver', () => {
     })
 
     it('should use pole hint to determine elbow direction', () => {
-      // Two solves with different pole hints should produce different results
+      // Two solves with different pole hints should produce different upper arm directions
+      // Use a target that requires significant elbow bend to see the pole effect
       const result1 = solveTwoBoneIK({
         ...defaultInput,
-        target: { x: 1.0, y: 0, z: 0 },
-        poleHint: { x: 0.5, y: 1.0, z: 0 }, // Elbow down
+        target: { x: 0.8, y: 0.8, z: 0 }, // Diagonal target requiring bend
+        poleHint: { x: 0.4, y: 0.4, z: -1.0 }, // Elbow forward
       })
 
       const result2 = solveTwoBoneIK({
         ...defaultInput,
-        target: { x: 1.0, y: 0, z: 0 },
-        poleHint: { x: 0.5, y: -1.0, z: 0 }, // Elbow up
+        target: { x: 0.8, y: 0.8, z: 0 }, // Same target
+        poleHint: { x: 0.4, y: 0.4, z: 1.0 }, // Elbow backward
       })
 
-      // The Y rotation (twist) should differ based on pole hint
-      expect(result1.shoulder.y).not.toBeCloseTo(result2.shoulder.y, 1)
+      // The shoulder rotations should differ based on pole hint
+      // At least one axis should be different
+      const xDiff = Math.abs(result1.shoulder.x - result2.shoulder.x)
+      const yDiff = Math.abs(result1.shoulder.y - result2.shoulder.y)
+      const zDiff = Math.abs(result1.shoulder.z - result2.shoulder.z)
+      const totalDiff = xDiff + yDiff + zDiff
+
+      // There should be some difference in shoulder rotation due to pole hint
+      expect(totalDiff).toBeGreaterThan(0.01)
     })
 
     it('should handle right arm (mirrored)', () => {
