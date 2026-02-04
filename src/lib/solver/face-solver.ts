@@ -30,5 +30,9 @@ export function solveFace(landmarks: FaceLandmarks): FaceResult | null {
   if (landmarks.length === 0) {
     return null
   }
-  return {} as FaceResult
+  return {
+    head: { pitch: 0, yaw: 0, roll: 0 },
+    eyes: { leftBlink: 0, rightBlink: 0 },
+    mouth: { open: 0, smile: 0 },
+  }
 }
