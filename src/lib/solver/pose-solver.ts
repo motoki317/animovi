@@ -1,6 +1,11 @@
 /**
- * Pose Solver - Extracts body rotations from pose landmarks.
+ * Pose Solver - Extracts body rotations from pose landmarks using IK.
+ *
+ * Uses inverse kinematics to solve arm rotations from wrist target positions.
+ * This allows hand movement to drive arm pose even when elbow doesn't move much.
  */
+
+import { solveTwoBoneIK, calculateArmLengths, type Vector3 } from '../math/two-bone-ik'
 
 export interface PoseLandmark {
   x: number
@@ -38,111 +43,108 @@ const LEFT_HIP = 23
 const RIGHT_HIP = 24
 const VISIBILITY_THRESHOLD = 0.5
 
+// Calibration state for arm lengths
+// These are learned from the first few frames of tracking
+interface ArmCalibration {
+  upperArmLength: number
+  lowerArmLength: number
+  sampleCount: number
+}
+
+const CALIBRATION_SAMPLES = 10
+const leftArmCalibration: ArmCalibration = { upperArmLength: 0, lowerArmLength: 0, sampleCount: 0 }
+const rightArmCalibration: ArmCalibration = { upperArmLength: 0, lowerArmLength: 0, sampleCount: 0 }
+
 /**
- * Calculate arm rotations from shoulder, elbow, wrist positions.
- *
- * VRM coordinate system (Y-up, right-handed):
- * - T-pose: arms horizontal, pointing along ±X axis
- * - Shoulder Z rotation: lifts arm up (positive) or down (negative) from T-pose
- * - Shoulder X rotation: moves arm forward (positive) or backward (negative)
- * - Shoulder Y rotation: twists the arm
- *
- * MediaPipe normalized coordinates:
- * - X: 0 (left edge) to 1 (right edge) - mirrored, so person's left is at higher X
- * - Y: 0 (top) to 1 (bottom)
- * - Z: depth, negative = closer to camera
+ * Update arm length calibration with new sample.
+ * Uses running average of first N samples.
  */
-function solveArm(
+function updateCalibration(
+  calibration: ArmCalibration,
+  shoulder: Vector3,
+  elbow: Vector3,
+  wrist: Vector3
+): void {
+  if (calibration.sampleCount >= CALIBRATION_SAMPLES) {
+    return // Already calibrated
+  }
+
+  const { upperArmLength, lowerArmLength } = calculateArmLengths(shoulder, elbow, wrist)
+
+  // Running average
+  const n = calibration.sampleCount
+  calibration.upperArmLength = (calibration.upperArmLength * n + upperArmLength) / (n + 1)
+  calibration.lowerArmLength = (calibration.lowerArmLength * n + lowerArmLength) / (n + 1)
+  calibration.sampleCount++
+}
+
+/**
+ * Check if calibration is complete
+ */
+function isCalibrated(calibration: ArmCalibration): boolean {
+  return calibration.sampleCount >= CALIBRATION_SAMPLES
+}
+
+/**
+ * Solve arm rotations using inverse kinematics.
+ *
+ * Takes the wrist position as the IK target and uses the detected elbow
+ * position as a pole hint for natural elbow orientation.
+ */
+function solveArmIK(
   shoulder: PoseLandmark,
   elbow: PoseLandmark,
   wrist: PoseLandmark,
+  calibration: ArmCalibration,
   isLeft: boolean
 ): { shoulder: { x: number; y: number; z: number }; elbow: { x: number; y: number; z: number } } {
-  // Vector from shoulder to elbow (upper arm direction)
-  const upperArm = {
-    x: elbow.x - shoulder.x,
-    y: elbow.y - shoulder.y,
-    z: elbow.z - shoulder.z,
+  // Update calibration if needed
+  updateCalibration(calibration, shoulder, elbow, wrist)
+
+  // If not yet calibrated, use current frame's measurements
+  let upperLen = calibration.upperArmLength
+  let lowerLen = calibration.lowerArmLength
+
+  if (!isCalibrated(calibration)) {
+    const lengths = calculateArmLengths(shoulder, elbow, wrist)
+    upperLen = lengths.upperArmLength
+    lowerLen = lengths.lowerArmLength
   }
 
-  // Vector from elbow to wrist (lower arm direction)
-  const lowerArm = {
-    x: wrist.x - elbow.x,
-    y: wrist.y - elbow.y,
-    z: wrist.z - elbow.z,
-  }
-
-  // Normalize vectors
-  const upperArmLen = Math.sqrt(upperArm.x ** 2 + upperArm.y ** 2 + upperArm.z ** 2)
-  const lowerArmLen = Math.sqrt(lowerArm.x ** 2 + lowerArm.y ** 2 + lowerArm.z ** 2)
-
-  if (upperArmLen === 0 || lowerArmLen === 0) {
+  // Sanity check - avoid zero lengths
+  if (upperLen < 0.001 || lowerLen < 0.001) {
     return {
       shoulder: { x: 0, y: 0, z: 0 },
       elbow: { x: 0, y: 0, z: 0 },
     }
   }
 
-  // Normalized upper arm direction
-  const upperArmDir = {
-    x: upperArm.x / upperArmLen,
-    y: upperArm.y / upperArmLen,
-    z: upperArm.z / upperArmLen,
-  }
-
-  // Shoulder Z rotation: how much arm is raised/lowered from horizontal
-  // In MediaPipe, Y increases downward, so positive upperArm.y means arm pointing down
-  // VRM: positive Z rotation raises the arm for left, lowers for right
-  const armDownAmount = upperArmDir.y // -1 (up) to +1 (down)
-  const shoulderZ = isLeft
-    ? armDownAmount * (Math.PI / 2)  // Left arm: down = positive Z
-    : -armDownAmount * (Math.PI / 2) // Right arm: down = negative Z
-
-  // Shoulder X rotation: how much arm is forward/backward
-  // In MediaPipe, negative Z = closer to camera = arm forward
-  const armForwardAmount = -upperArmDir.z // positive = forward
-  const shoulderX = armForwardAmount * (Math.PI / 3) // Limit to 60 degrees
-
-  // Shoulder Y rotation (twist): determines where the elbow points
-  // Calculate by finding the angle of the forearm in the plane perpendicular to upper arm
-  // Project forearm onto plane perpendicular to upper arm, then find its angle
-
-  // First, get component of forearm along upper arm direction
-  const forearmAlongUpperArm =
-    (lowerArm.x * upperArmDir.x + lowerArm.y * upperArmDir.y + lowerArm.z * upperArmDir.z)
-
-  // Subtract to get the perpendicular component (forearm projected onto perpendicular plane)
-  const forearmPerp = {
-    x: lowerArm.x - forearmAlongUpperArm * upperArmDir.x,
-    y: lowerArm.y - forearmAlongUpperArm * upperArmDir.y,
-    z: lowerArm.z - forearmAlongUpperArm * upperArmDir.z,
-  }
-
-  const forearmPerpLen = Math.sqrt(forearmPerp.x ** 2 + forearmPerp.y ** 2 + forearmPerp.z ** 2)
-
-  let shoulderY = 0
-  if (forearmPerpLen > 0.01) {
-    // Calculate twist angle based on forearm's perpendicular direction
-    // Use atan2 with the y and z components of the perpendicular forearm
-    // This gives us how much the elbow is rotated around the arm axis
-    // Flip the sign to correct the twist direction
-    shoulderY = Math.atan2(-forearmPerp.z, forearmPerp.y) * (isLeft ? 1 : -1)
-
-    // Clamp to reasonable range
-    shoulderY = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, shoulderY))
-  }
-
-  // Elbow bend: angle between upper and lower arm vectors
-  const dot = (upperArm.x * lowerArm.x + upperArm.y * lowerArm.y + upperArm.z * lowerArm.z)
-            / (upperArmLen * lowerArmLen)
-  const angle = Math.acos(Math.max(-1, Math.min(1, dot)))
-  // Elbow only bends one way (flexion), angle of 0 = straight, PI = fully bent
-  const elbowBend = Math.PI - angle
+  // Solve IK with wrist as target, elbow as pole hint
+  const result = solveTwoBoneIK({
+    shoulder,
+    target: wrist,
+    upperArmLength: upperLen,
+    lowerArmLength: lowerLen,
+    poleHint: elbow,
+    isLeft,
+  })
 
   return {
-    shoulder: { x: shoulderX, y: shoulderY, z: shoulderZ },
-    elbow: { x: -elbowBend, y: 0, z: 0 }, // Negative X for elbow flexion in VRM
+    shoulder: result.shoulder,
+    elbow: result.elbow,
   }
+}
+
+/**
+ * Reset arm calibration (call when user changes or tracking restarts)
+ */
+export function resetArmCalibration(): void {
+  leftArmCalibration.upperArmLength = 0
+  leftArmCalibration.lowerArmLength = 0
+  leftArmCalibration.sampleCount = 0
+  rightArmCalibration.upperArmLength = 0
+  rightArmCalibration.lowerArmLength = 0
+  rightArmCalibration.sampleCount = 0
 }
 
 export function solvePose(landmarks: PoseLandmarks): PoseResult | null {
@@ -179,9 +181,9 @@ export function solvePose(landmarks: PoseLandmarks): PoseResult | null {
   // TODO: Implement proper calibration or use relative motion instead
   const spinePitch = 0
 
-  // Solve arm rotations
-  const leftArmResult = solveArm(leftShoulder, leftElbow, leftWrist, true)
-  const rightArmResult = solveArm(rightShoulder, rightElbow, rightWrist, false)
+  // Solve arm rotations using IK
+  const leftArmResult = solveArmIK(leftShoulder, leftElbow, leftWrist, leftArmCalibration, true)
+  const rightArmResult = solveArmIK(rightShoulder, rightElbow, rightWrist, rightArmCalibration, false)
 
   return {
     spine: { pitch: spinePitch, yaw: spineYaw, roll: spineRoll },
