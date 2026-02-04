@@ -49,4 +49,15 @@ describe('PoseSolver', () => {
     expect(result).not.toBeNull()
     expect(result!.spine.yaw).toBeGreaterThan(0.1)
   })
+
+  it('should return null when key landmarks have low visibility', () => {
+    const landmarks = createNeutralPoseLandmarks()
+    // Set shoulders to low visibility (below threshold)
+    landmarks[11] = { x: 0.4, y: 0.3, z: 0, visibility: 0.3 }
+    landmarks[12] = { x: 0.6, y: 0.3, z: 0, visibility: 0.3 }
+
+    const result = solvePose(landmarks)
+
+    expect(result).toBeNull()
+  })
 })

@@ -30,6 +30,7 @@ export interface PoseResult {
 // MediaPipe Pose landmark indices
 const LEFT_SHOULDER = 11
 const RIGHT_SHOULDER = 12
+const VISIBILITY_THRESHOLD = 0.5
 
 export function solvePose(landmarks: PoseLandmarks): PoseResult | null {
   if (landmarks.length === 0) {
@@ -38,6 +39,14 @@ export function solvePose(landmarks: PoseLandmarks): PoseResult | null {
 
   const leftShoulder = landmarks[LEFT_SHOULDER]
   const rightShoulder = landmarks[RIGHT_SHOULDER]
+
+  // Check visibility of key landmarks
+  if (
+    (leftShoulder.visibility ?? 0) < VISIBILITY_THRESHOLD ||
+    (rightShoulder.visibility ?? 0) < VISIBILITY_THRESHOLD
+  ) {
+    return null
+  }
 
   // Calculate spine yaw from shoulder z-difference
   // Right shoulder forward = positive yaw (body turned right)
