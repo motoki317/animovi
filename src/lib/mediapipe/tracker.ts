@@ -54,6 +54,7 @@ export class MediaPipeTracker {
     const vision = await FilesetResolver.forVisionTasks(this.options.wasmBasePath!)
 
     // Create the holistic landmarker
+    // Note: HolisticLandmarker has different options than FaceLandmarker/PoseLandmarker
     this.landmarker = await HolisticLandmarker.createFromOptions(vision, {
       baseOptions: {
         modelAssetPath:
@@ -61,12 +62,9 @@ export class MediaPipeTracker {
         delegate: 'GPU',
       },
       runningMode: 'VIDEO',
-      numFaces: this.options.numFaces,
-      numHands: this.options.numHands,
-      numPoses: this.options.numPoses,
       minFaceDetectionConfidence: this.options.minFaceDetectionConfidence,
       minPoseDetectionConfidence: this.options.minPoseDetectionConfidence,
-      minHandDetectionConfidence: this.options.minHandDetectionConfidence,
+      minHandLandmarksConfidence: this.options.minHandDetectionConfidence,
     })
   }
 

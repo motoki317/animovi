@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import type { HolisticSolverResult } from '../lib/solver/holistic-solver'
+import type { HolisticResult } from '../lib/solver/holistic-solver'
 
 export interface UseTrackingOptions {
   /** Ref to the video element providing camera feed */
@@ -25,7 +25,7 @@ export interface UseTrackingOptions {
 
 export interface UseTrackingResult {
   /** Current tracking data or null */
-  trackingData: HolisticSolverResult | null
+  trackingData: HolisticResult | null
   /** Whether tracking is active and receiving data */
   isTracking: boolean
   /** Any error that occurred */
@@ -46,7 +46,7 @@ interface WorkerMessage {
 
 interface WorkerResponse {
   type: WorkerResponseType
-  payload?: HolisticSolverResult | { message: string }
+  payload?: HolisticResult | { message: string }
 }
 
 export function useTracking(options: UseTrackingOptions): UseTrackingResult {
@@ -60,7 +60,7 @@ export function useTracking(options: UseTrackingOptions): UseTrackingResult {
     handTracking = true,
   } = options
 
-  const [trackingData, setTrackingData] = useState<HolisticSolverResult | null>(
+  const [trackingData, setTrackingData] = useState<HolisticResult | null>(
     null
   )
   const [isTracking, setIsTracking] = useState(false)
@@ -88,7 +88,7 @@ export function useTracking(options: UseTrackingOptions): UseTrackingResult {
           setIsTracking(true)
           break
         case 'result':
-          setTrackingData(payload as HolisticSolverResult)
+          setTrackingData(payload as HolisticResult)
           break
         case 'error':
           setError(new Error((payload as { message: string }).message))

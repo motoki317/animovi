@@ -164,7 +164,7 @@ export class FrameCapture {
     }
 
     if (!this.context) {
-      this.context = this.canvas.getContext('2d')
+      this.context = this.canvas.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null
     }
   }
 

@@ -4,7 +4,15 @@ import { useVRMLoader } from './use-vrm-loader'
 
 // Mock VRM instance
 const createMockVRM = () => ({
-  scene: { traverse: vi.fn(), dispose: vi.fn() },
+  scene: {
+    traverse: vi.fn((callback: (obj: unknown) => void) => {
+      // Simulate traversing a mesh with geometry and material
+      callback({
+        geometry: { dispose: vi.fn() },
+        material: { dispose: vi.fn() },
+      })
+    }),
+  },
   meta: { name: 'Test VRM' },
 })
 
@@ -152,7 +160,7 @@ describe('useVRMLoader', () => {
       await result.current.loadFromUrl('/second.vrm')
     })
 
-    expect(firstVRM.scene.dispose).toHaveBeenCalled()
+    expect(firstVRM.scene.traverse).toHaveBeenCalled()
     expect(result.current.vrm).toBe(secondVRM)
   })
 

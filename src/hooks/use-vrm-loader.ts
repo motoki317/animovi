@@ -36,7 +36,20 @@ export function useVRMLoader(): UseVRMLoaderResult {
   // Dispose previous VRM if exists
   const disposePreviousVRM = useCallback((previousVrm: VRM | null) => {
     if (previousVrm) {
-      previousVrm.scene.dispose?.()
+      // VRM doesn't have a direct dispose method, but we can traverse and dispose materials/geometries
+      previousVrm.scene.traverse((obj) => {
+        if ('geometry' in obj && obj.geometry) {
+          (obj.geometry as { dispose?: () => void }).dispose?.()
+        }
+        if ('material' in obj && obj.material) {
+          const material = obj.material as { dispose?: () => void } | Array<{ dispose?: () => void }>
+          if (Array.isArray(material)) {
+            material.forEach((m) => m.dispose?.())
+          } else {
+            material.dispose?.()
+          }
+        }
+      })
     }
   }, [])
 

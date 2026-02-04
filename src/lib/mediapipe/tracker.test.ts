@@ -137,9 +137,9 @@ describe('MediaPipeTracker', () => {
     expect(mocks.createFromOptions).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        numFaces: 2,
-        numHands: 4,
-        numPoses: 2,
+        minFaceDetectionConfidence: 0.7,
+        minPoseDetectionConfidence: 0.7,
+        minHandLandmarksConfidence: 0.7,
       })
     )
   })
