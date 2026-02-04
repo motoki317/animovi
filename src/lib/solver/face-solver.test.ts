@@ -84,4 +84,18 @@ describe('FaceSolver', () => {
     expect(result).not.toBeNull()
     expect(result!.mouth.open).toBeGreaterThan(0.3)
   })
+
+  it('should detect smile when mouth corners are raised', () => {
+    const landmarks = createNeutralFaceLandmarks()
+    // Mouth corners: left (61), right (291)
+    // Neutral: corners at y=0.58
+    // Smile: corners raised (lower y value) and wider apart
+    landmarks[61] = { x: 0.35, y: 0.55, z: 0 } // left corner raised
+    landmarks[291] = { x: 0.65, y: 0.55, z: 0 } // right corner raised
+
+    const result = solveFace(landmarks)
+
+    expect(result).not.toBeNull()
+    expect(result!.mouth.smile).toBeGreaterThan(0.3)
+  })
 })
