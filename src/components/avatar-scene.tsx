@@ -4,7 +4,7 @@
  * AvatarScene - Three.js canvas for VRM avatar rendering.
  */
 
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import type { VRM } from '@pixiv/three-vrm'
 import type { BackgroundType } from './background-settings'
@@ -33,51 +33,12 @@ export function AvatarScene({
   const sceneRef = useRef<THREE.Scene | null>(null)
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null)
 
-  // Auto-frame to VRM head position
-  const autoFrameToHead = useCallback((vrmModel: VRM) => {
-    if (!cameraRef.current) return
+  // Store callback in ref to avoid dependency issues
+  const onAutoFrameRef = useRef(onAutoFrame)
+  onAutoFrameRef.current = onAutoFrame
 
-    try {
-      // Try to get head bone position
-      const headBone = vrmModel.humanoid?.getNormalizedBoneNode('head')
-      if (headBone) {
-        const headPos = new THREE.Vector3()
-        headBone.getWorldPosition(headPos)
-
-        // Position camera to look at head with some offset
-        const newY = headPos.y
-        const newZ = 1.5 // Keep default distance
-
-        cameraRef.current.position.y = newY
-        cameraRef.current.position.z = newZ
-        cameraRef.current.lookAt(0, newY, 0)
-
-        if (onAutoFrame) {
-          onAutoFrame(newY, newZ)
-        }
-        return
-      }
-
-      // Fallback: use bounding box center
-      const box = new THREE.Box3().setFromObject(vrmModel.scene)
-      const center = box.getCenter(new THREE.Vector3())
-      const size = box.getSize(new THREE.Vector3())
-
-      // Position camera to see the upper body/head
-      const newY = center.y + size.y * 0.2
-      const newZ = Math.max(1.5, size.y * 0.8)
-
-      cameraRef.current.position.y = newY
-      cameraRef.current.position.z = newZ
-      cameraRef.current.lookAt(0, newY, 0)
-
-      if (onAutoFrame) {
-        onAutoFrame(newY, newZ)
-      }
-    } catch {
-      // Silently fail - keep current camera position
-    }
-  }, [onAutoFrame])
+  // Track which VRM we've already auto-framed to prevent loops
+  const autoFramedVrmRef = useRef<VRM | null>(null)
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -177,16 +138,57 @@ export function AvatarScene({
     }
   }, [backgroundType, backgroundColor])
 
-  // Add/remove VRM from scene
+  // Add/remove VRM from scene and handle auto-framing
   useEffect(() => {
     if (!sceneRef.current) return
 
     if (vrm?.scene) {
       sceneRef.current.add(vrm.scene)
 
-      // Auto-frame to head position when VRM loads
-      if (autoFrameOnLoad) {
-        autoFrameToHead(vrm)
+      // Auto-frame to head position when VRM loads (only once per VRM)
+      if (autoFrameOnLoad && vrm !== autoFramedVrmRef.current) {
+        autoFramedVrmRef.current = vrm
+
+        // Run auto-frame logic
+        if (cameraRef.current) {
+          try {
+            // Try to get head bone position
+            const headBone = vrm.humanoid?.getNormalizedBoneNode('head')
+            if (headBone) {
+              const headPos = new THREE.Vector3()
+              headBone.getWorldPosition(headPos)
+
+              // Position camera to look at head with some offset
+              const newY = headPos.y
+              const newZ = 1.5 // Keep default distance
+
+              cameraRef.current.position.y = newY
+              cameraRef.current.position.z = newZ
+              cameraRef.current.lookAt(0, newY, 0)
+
+              // Notify parent via ref (avoids dependency loop)
+              onAutoFrameRef.current?.(newY, newZ)
+            } else {
+              // Fallback: use bounding box center
+              const box = new THREE.Box3().setFromObject(vrm.scene)
+              const center = box.getCenter(new THREE.Vector3())
+              const size = box.getSize(new THREE.Vector3())
+
+              // Position camera to see the upper body/head
+              const newY = center.y + size.y * 0.2
+              const newZ = Math.max(1.5, size.y * 0.8)
+
+              cameraRef.current.position.y = newY
+              cameraRef.current.position.z = newZ
+              cameraRef.current.lookAt(0, newY, 0)
+
+              // Notify parent via ref (avoids dependency loop)
+              onAutoFrameRef.current?.(newY, newZ)
+            }
+          } catch {
+            // Silently fail - keep current camera position
+          }
+        }
       }
     }
 
@@ -195,7 +197,7 @@ export function AvatarScene({
         sceneRef.current.remove(vrm.scene)
       }
     }
-  }, [vrm, autoFrameOnLoad, autoFrameToHead])
+  }, [vrm, autoFrameOnLoad]) // Removed autoFrameToHead dependency - using refs instead
 
   return (
     <div

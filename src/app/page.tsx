@@ -35,25 +35,34 @@ export default function HomePage() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [settings])
 
-  // Handle background settings change
+  // Get stable setter references from the store
+  const {
+    setBackgroundType,
+    setBackgroundColor,
+    setBackgroundImageUrl,
+    setCameraY,
+    setCameraZ,
+  } = settings
+
+  // Handle background settings change - stable callback
   const handleBackgroundChange = useCallback((config: BackgroundConfig) => {
-    settings.setBackgroundType(config.type)
+    setBackgroundType(config.type)
     if (config.color) {
-      settings.setBackgroundColor(config.color)
+      setBackgroundColor(config.color)
     }
     if (config.imageFile) {
       const url = URL.createObjectURL(config.imageFile)
-      settings.setBackgroundImageUrl(url)
+      setBackgroundImageUrl(url)
     } else if (config.imageUrl) {
-      settings.setBackgroundImageUrl(config.imageUrl)
+      setBackgroundImageUrl(config.imageUrl)
     }
-  }, [settings])
+  }, [setBackgroundType, setBackgroundColor, setBackgroundImageUrl])
 
-  // Handle auto-frame callback
+  // Handle auto-frame callback - stable because Zustand setters are stable
   const handleAutoFrame = useCallback((y: number, z: number) => {
-    settings.setCameraY(y)
-    settings.setCameraZ(z)
-  }, [settings])
+    setCameraY(y)
+    setCameraZ(z)
+  }, [setCameraY, setCameraZ])
 
   return (
     <CameraProvider>
