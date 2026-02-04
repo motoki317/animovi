@@ -2,6 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, act } from '@testing-library/react'
 import { AvatarScene } from './avatar-scene'
 
+// Track renderer instances for testing
+const rendererInstances: { dispose: ReturnType<typeof vi.fn> }[] = []
+
 // Mock Three.js with proper classes
 vi.mock('three', () => {
   class MockScene {
@@ -22,6 +25,10 @@ vi.mock('three', () => {
     setClearColor = vi.fn()
     render = vi.fn()
     dispose = vi.fn()
+
+    constructor() {
+      rendererInstances.push(this)
+    }
   }
   class MockDirectionalLight {
     position = { set: vi.fn() }
@@ -83,6 +90,35 @@ describe('AvatarScene', () => {
 
     const container = screen.getByTestId('avatar-scene')
     expect(container).toBeDefined()
+  })
+
+  it('should not recreate renderer when background color changes', () => {
+    // Clear the tracker
+    rendererInstances.length = 0
+
+    const { rerender, unmount } = render(
+      <AvatarScene backgroundType="solid" backgroundColor="#000000" />
+    )
+
+    // Should have created exactly one renderer
+    expect(rendererInstances).toHaveLength(1)
+    const renderer = rendererInstances[0]
+
+    // Change background color multiple times
+    rerender(<AvatarScene backgroundType="solid" backgroundColor="#ff0000" />)
+    rerender(<AvatarScene backgroundType="solid" backgroundColor="#00ff00" />)
+
+    // Should still be the same single renderer (not recreated)
+    expect(rendererInstances).toHaveLength(1)
+
+    // Renderer should NOT have been disposed during rerender
+    expect(renderer.dispose).not.toHaveBeenCalled()
+
+    // Unmount to trigger cleanup
+    unmount()
+
+    // Now dispose should be called once (cleanup)
+    expect(renderer.dispose).toHaveBeenCalledTimes(1)
   })
 
   it('should call onAutoFrame only once per VRM load', () => {

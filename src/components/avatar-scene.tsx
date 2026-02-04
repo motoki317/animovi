@@ -40,15 +40,21 @@ export function AvatarScene({
   // Track which VRM we've already auto-framed to prevent loops
   const autoFramedVrmRef = useRef<VRM | null>(null)
 
+  // Store initial values in refs for initialization
+  const initialBackgroundTypeRef = useRef(backgroundType)
+  const initialBackgroundColorRef = useRef(backgroundColor)
+  const initialCameraYRef = useRef(cameraY)
+  const initialCameraZRef = useRef(cameraZ)
+
   useEffect(() => {
     if (!containerRef.current) return
 
     // Initialize scene
     const scene = new THREE.Scene()
-    if (backgroundType === 'transparent') {
+    if (initialBackgroundTypeRef.current === 'transparent') {
       scene.background = null
     } else {
-      scene.background = new THREE.Color(backgroundColor)
+      scene.background = new THREE.Color(initialBackgroundColorRef.current)
     }
     sceneRef.current = scene
 
@@ -59,18 +65,18 @@ export function AvatarScene({
       0.1,
       20
     )
-    camera.position.set(0, cameraY, cameraZ)
-    camera.lookAt(0, cameraY, 0)
+    camera.position.set(0, initialCameraYRef.current, initialCameraZRef.current)
+    camera.lookAt(0, initialCameraYRef.current, 0)
     cameraRef.current = camera
 
-    // Initialize renderer
+    // Initialize renderer with alpha support for potential transparent backgrounds
     const renderer = new THREE.WebGLRenderer({
       antialias: true,
-      alpha: backgroundType === 'transparent',
+      alpha: true, // Always enable alpha for flexibility
     })
     renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight)
     renderer.setPixelRatio(window.devicePixelRatio)
-    if (backgroundType === 'transparent') {
+    if (initialBackgroundTypeRef.current === 'transparent') {
       renderer.setClearColor(0x000000, 0)
     }
     containerRef.current.appendChild(renderer.domElement)
@@ -109,7 +115,7 @@ export function AvatarScene({
       renderer.dispose()
       containerRef.current?.removeChild(renderer.domElement)
     }
-  }, [backgroundType, backgroundColor, cameraY, cameraZ])
+  }, []) // Empty deps - only initialize once
 
   // Update camera position when props change
   useEffect(() => {
