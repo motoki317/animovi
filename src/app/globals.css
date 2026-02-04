@@ -1,0 +1,19 @@
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+  font-family: system-ui, -apple-system, sans-serif;
+  background-color: #1a1a2e;
+  color: #eee;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
