@@ -99,12 +99,16 @@ function solveArmIK(
   isLeft: boolean
 ): { shoulder: { x: number; y: number; z: number }; elbow: { x: number; y: number; z: number } } {
   // Transform MediaPipe coordinates to VRM-compatible space
-  // MediaPipe: X left-to-right, Y top-to-bottom (down), Z negative toward camera
-  // VRM/IK: X right, Y up, Z toward viewer (positive toward camera)
+  // MediaPipe (mirrored webcam): X 0-1 left-to-right, Y 0-1 top-to-bottom, Z negative toward camera
+  // VRM: X positive = person's right, Y positive = up, Z positive = toward viewer
+  //
+  // In mirrored view, person's left appears on right side of image (higher X).
+  // So higher MediaPipe X = person's left = VRM's negative X direction.
+  // We need to flip X to un-mirror, plus flip Y and Z for coordinate system.
   const toVRMSpace = (p: PoseLandmark): Vector3 => ({
-    x: p.x,    // Keep X (correct in mirrored view)
-    y: -p.y,   // Flip Y (MediaPipe Y-down to VRM Y-up)
-    z: -p.z,   // Flip Z (MediaPipe negative-toward-camera to VRM positive-toward-viewer)
+    x: -(p.x - 0.5),  // Flip X around center to un-mirror
+    y: -p.y,          // Flip Y (MediaPipe Y-down to VRM Y-up)
+    z: -p.z,          // Flip Z (MediaPipe Z-negative-forward to VRM Z-positive-forward)
   })
 
   const shoulderVRM = toVRMSpace(shoulder)
