@@ -1,0 +1,101 @@
+.background-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.background-settings__types {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+.background-settings__legend {
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: #333;
+}
+
+.background-settings__option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.background-settings__option input {
+  cursor: pointer;
+}
+
+.background-settings__color-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.background-settings__color-label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+}
+
+.background-settings__color-input {
+  width: 48px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.background-settings__presets {
+  display: flex;
+  gap: 8px;
+}
+
+.background-settings__preset {
+  width: 32px;
+  height: 32px;
+  border: 2px solid #ccc;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: transform 0.1s, border-color 0.1s;
+}
+
+.background-settings__preset:hover {
+  transform: scale(1.1);
+  border-color: #666;
+}
+
+.background-settings__image-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.background-settings__image-label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.background-settings__image-input {
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.background-settings__preview {
+  width: 100%;
+  height: 80px;
+  background-size: cover;
+  background-position: center;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+}
