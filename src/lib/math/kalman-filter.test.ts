@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { KalmanFilter } from './kalman-filter'
+import { KalmanFilter, KalmanFilter3D } from './kalman-filter'
 
 describe('KalmanFilter', () => {
   it('should smooth noisy input by returning value between previous and current', () => {
@@ -30,5 +30,23 @@ describe('KalmanFilter', () => {
 
     // Higher responsiveness should track closer to new value
     expect(fastResult).toBeGreaterThan(slowResult)
+  })
+
+  it('should smooth 3D vectors component-wise', () => {
+    const filter = new KalmanFilter3D()
+
+    // Initialize with origin
+    filter.update({ x: 0, y: 0, z: 0 })
+
+    // Update with new position
+    const smoothed = filter.update({ x: 10, y: 20, z: 30 })
+
+    // Each component should be smoothed independently
+    expect(smoothed.x).toBeGreaterThan(0)
+    expect(smoothed.x).toBeLessThan(10)
+    expect(smoothed.y).toBeGreaterThan(0)
+    expect(smoothed.y).toBeLessThan(20)
+    expect(smoothed.z).toBeGreaterThan(0)
+    expect(smoothed.z).toBeLessThan(30)
   })
 })
