@@ -37,4 +37,16 @@ describe('PoseSolver', () => {
     expect(result!.spine.yaw).toBeCloseTo(0, 1)
     expect(result!.spine.roll).toBeCloseTo(0, 1)
   })
+
+  it('should detect positive spine yaw when body turns right', () => {
+    const landmarks = createNeutralPoseLandmarks()
+    // Right shoulder forward (larger z), left shoulder back
+    landmarks[11] = { x: 0.4, y: 0.3, z: -0.05, visibility: 1.0 } // left shoulder back
+    landmarks[12] = { x: 0.6, y: 0.3, z: 0.05, visibility: 1.0 } // right shoulder forward
+
+    const result = solvePose(landmarks)
+
+    expect(result).not.toBeNull()
+    expect(result!.spine.yaw).toBeGreaterThan(0.1)
+  })
 })

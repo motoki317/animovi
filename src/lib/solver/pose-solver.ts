@@ -27,13 +27,24 @@ export interface PoseResult {
   }
 }
 
+// MediaPipe Pose landmark indices
+const LEFT_SHOULDER = 11
+const RIGHT_SHOULDER = 12
+
 export function solvePose(landmarks: PoseLandmarks): PoseResult | null {
   if (landmarks.length === 0) {
     return null
   }
 
+  const leftShoulder = landmarks[LEFT_SHOULDER]
+  const rightShoulder = landmarks[RIGHT_SHOULDER]
+
+  // Calculate spine yaw from shoulder z-difference
+  // Right shoulder forward = positive yaw (body turned right)
+  const spineYaw = (rightShoulder.z - leftShoulder.z) * 5
+
   return {
-    spine: { pitch: 0, yaw: 0, roll: 0 },
+    spine: { pitch: 0, yaw: spineYaw, roll: 0 },
     leftArm: {
       shoulder: { x: 0, y: 0, z: 0 },
       elbow: { x: 0, y: 0, z: 0 },
