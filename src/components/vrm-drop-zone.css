@@ -1,0 +1,91 @@
+.vrm-drop-zone {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+  padding: 32px;
+  border: 2px dashed #ccc;
+  border-radius: 12px;
+  background: #fafafa;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.vrm-drop-zone:hover {
+  border-color: #999;
+  background: #f0f0f0;
+}
+
+.vrm-drop-zone--dragging {
+  border-color: #4a90d9;
+  background: #e8f4ff;
+  border-style: solid;
+}
+
+.vrm-drop-zone--loading {
+  cursor: wait;
+  pointer-events: none;
+}
+
+.vrm-drop-zone--disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.vrm-drop-zone__input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
+.vrm-drop-zone__content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+}
+
+.vrm-drop-zone__icon {
+  font-size: 48px;
+}
+
+.vrm-drop-zone__text {
+  font-size: 16px;
+  font-weight: 500;
+  color: #333;
+}
+
+.vrm-drop-zone__hint {
+  font-size: 14px;
+  color: #666;
+}
+
+.vrm-drop-zone__loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.vrm-drop-zone__progress {
+  width: 200px;
+  height: 8px;
+  background: #e0e0e0;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.vrm-drop-zone__progress-bar {
+  height: 100%;
+  background: #4a90d9;
+  transition: width 0.2s ease;
+}
