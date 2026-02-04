@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { quaternionToEuler, clampAngle } from './euler-utils'
+import { quaternionToEuler, clampAngle, lerpAngle } from './euler-utils'
 
 describe('EulerUtils', () => {
   it('should convert identity quaternion to zero rotation', () => {
@@ -33,5 +33,10 @@ describe('EulerUtils', () => {
   it('should clamp angle exceeding max to max', () => {
     const clamped = clampAngle(2.0, -1.0, 1.0)
     expect(clamped).toBe(1.0)
+  })
+
+  it('should interpolate angles at midpoint', () => {
+    const result = lerpAngle(0, Math.PI, 0.5)
+    expect(result).toBeCloseTo(Math.PI / 2)
   })
 })

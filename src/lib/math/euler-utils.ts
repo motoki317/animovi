@@ -46,3 +46,10 @@ export function quaternionToEuler(q: Quaternion): Euler {
 export function clampAngle(angle: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, angle))
 }
+
+/**
+ * Linear interpolation between two angles.
+ */
+export function lerpAngle(start: number, end: number, t: number): number {
+  return start + t * (end - start)
+}
