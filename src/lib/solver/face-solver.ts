@@ -28,6 +28,8 @@ export interface FaceResult {
 
 // MediaPipe landmark indices
 const NOSE_TIP = 1
+const FOREHEAD = 10
+const CHIN = 152
 const CENTER_X = 0.5
 
 export function solveFace(landmarks: FaceLandmarks): FaceResult | null {
@@ -35,12 +37,19 @@ export function solveFace(landmarks: FaceLandmarks): FaceResult | null {
     return null
   }
 
-  // Calculate yaw from nose position relative to center
   const nose = landmarks[NOSE_TIP]
-  const yaw = (CENTER_X - nose.x) * 2 // Scale factor for sensitivity
+  const forehead = landmarks[FOREHEAD]
+  const chin = landmarks[CHIN]
+
+  // Calculate yaw from nose position relative to center
+  const yaw = (CENTER_X - nose.x) * 2
+
+  // Calculate pitch from forehead-chin z difference
+  // Positive z difference (forehead forward) = head tilting down = negative pitch
+  const pitch = (chin.z - forehead.z) * 5
 
   return {
-    head: { pitch: 0, yaw, roll: 0 },
+    head: { pitch, yaw, roll: 0 },
     eyes: { leftBlink: 0, rightBlink: 0 },
     mouth: { open: 0, smile: 0 },
   }

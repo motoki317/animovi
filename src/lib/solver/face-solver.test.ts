@@ -46,4 +46,16 @@ describe('FaceSolver', () => {
     expect(result).not.toBeNull()
     expect(result!.head.yaw).toBeGreaterThan(0.1)
   })
+
+  it('should detect negative pitch when face tilts down', () => {
+    const landmarks = createNeutralFaceLandmarks()
+    // Move forehead closer (forward) and chin back (head tilting down)
+    landmarks[10] = { x: 0.5, y: 0.3, z: 0.03 } // forehead forward
+    landmarks[152] = { x: 0.5, y: 0.7, z: -0.02 } // chin back
+
+    const result = solveFace(landmarks)
+
+    expect(result).not.toBeNull()
+    expect(result!.head.pitch).toBeLessThan(-0.1)
+  })
 })
