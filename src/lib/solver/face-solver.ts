@@ -34,8 +34,11 @@ const LEFT_EYE_UPPER = 159
 const LEFT_EYE_LOWER = 145
 const RIGHT_EYE_UPPER = 386
 const RIGHT_EYE_LOWER = 374
+const UPPER_LIP = 13
+const LOWER_LIP = 14
 const CENTER_X = 0.5
 const EYE_OPEN_THRESHOLD = 0.02 // Typical open eye gap
+const MOUTH_OPEN_THRESHOLD = 0.1 // Max mouth opening
 
 export function solveFace(landmarks: FaceLandmarks): FaceResult | null {
   if (landmarks.length === 0) {
@@ -61,9 +64,13 @@ export function solveFace(landmarks: FaceLandmarks): FaceResult | null {
   const leftBlink = Math.max(0, Math.min(1, 1 - leftEyeGap / EYE_OPEN_THRESHOLD))
   const rightBlink = Math.max(0, Math.min(1, 1 - rightEyeGap / EYE_OPEN_THRESHOLD))
 
+  // Calculate mouth open from lip distance
+  const mouthGap = landmarks[LOWER_LIP].y - landmarks[UPPER_LIP].y
+  const mouthOpen = Math.max(0, Math.min(1, mouthGap / MOUTH_OPEN_THRESHOLD))
+
   return {
     head: { pitch, yaw, roll: 0 },
     eyes: { leftBlink, rightBlink },
-    mouth: { open: 0, smile: 0 },
+    mouth: { open: mouthOpen, smile: 0 },
   }
 }

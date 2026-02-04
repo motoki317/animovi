@@ -72,4 +72,16 @@ describe('FaceSolver', () => {
     expect(result).not.toBeNull()
     expect(result!.eyes.leftBlink).toBeGreaterThan(0.5)
   })
+
+  it('should detect mouth open when lips are apart', () => {
+    const landmarks = createNeutralFaceLandmarks()
+    // Mouth landmarks (upper lip: 13, lower lip: 14)
+    landmarks[13] = { x: 0.5, y: 0.6, z: 0 } // upper lip
+    landmarks[14] = { x: 0.5, y: 0.7, z: 0 } // lower lip (mouth open)
+
+    const result = solveFace(landmarks)
+
+    expect(result).not.toBeNull()
+    expect(result!.mouth.open).toBeGreaterThan(0.3)
+  })
 })
