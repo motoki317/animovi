@@ -143,6 +143,8 @@ export function AvatarScene({
     if (!sceneRef.current) return
 
     if (vrm?.scene) {
+      // Rotate VRM to face camera (VRM models are exported facing +Z, camera is at +Z)
+      vrm.scene.rotation.y = Math.PI
       sceneRef.current.add(vrm.scene)
 
       // Auto-frame to head position when VRM loads (only once per VRM)

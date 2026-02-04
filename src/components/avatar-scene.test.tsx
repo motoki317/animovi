@@ -92,6 +92,7 @@ describe('AvatarScene', () => {
     const mockVRM = {
       scene: {
         traverse: vi.fn(),
+        rotation: { y: 0 },
       },
       humanoid: {
         getNormalizedBoneNode: vi.fn().mockReturnValue({
@@ -131,7 +132,7 @@ describe('AvatarScene', () => {
     const onAutoFrame = vi.fn()
 
     const mockVRM1 = {
-      scene: { traverse: vi.fn() },
+      scene: { traverse: vi.fn(), rotation: { y: 0 } },
       humanoid: {
         getNormalizedBoneNode: vi.fn().mockReturnValue({
           getWorldPosition: vi.fn((vec) => {
@@ -143,7 +144,7 @@ describe('AvatarScene', () => {
     }
 
     const mockVRM2 = {
-      scene: { traverse: vi.fn() },
+      scene: { traverse: vi.fn(), rotation: { y: 0 } },
       humanoid: {
         getNormalizedBoneNode: vi.fn().mockReturnValue({
           getWorldPosition: vi.fn((vec) => {
@@ -181,7 +182,7 @@ describe('AvatarScene', () => {
     const onAutoFrame = vi.fn()
 
     const mockVRM = {
-      scene: { traverse: vi.fn() },
+      scene: { traverse: vi.fn(), rotation: { y: 0 } },
       humanoid: {
         getNormalizedBoneNode: vi.fn().mockReturnValue({
           getWorldPosition: vi.fn((vec) => {
@@ -203,12 +204,34 @@ describe('AvatarScene', () => {
     expect(onAutoFrame).not.toHaveBeenCalled()
   })
 
+  it('should rotate VRM to face camera when added to scene', () => {
+    const mockVRM = {
+      scene: {
+        traverse: vi.fn(),
+        rotation: { y: 0 },
+      },
+      humanoid: {
+        getNormalizedBoneNode: vi.fn().mockReturnValue({
+          getWorldPosition: vi.fn((vec) => {
+            vec.y = 1.5
+            return vec
+          }),
+        }),
+      },
+    }
+
+    render(<AvatarScene vrm={mockVRM as never} />)
+
+    // VRM should be rotated 180 degrees (Math.PI) to face camera
+    expect(mockVRM.scene.rotation.y).toBe(Math.PI)
+  })
+
   it('should handle callback updates without infinite loops', () => {
     const onAutoFrame1 = vi.fn()
     const onAutoFrame2 = vi.fn()
 
     const mockVRM = {
-      scene: { traverse: vi.fn() },
+      scene: { traverse: vi.fn(), rotation: { y: 0 } },
       humanoid: {
         getNormalizedBoneNode: vi.fn().mockReturnValue({
           getWorldPosition: vi.fn((vec) => {
