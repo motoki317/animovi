@@ -203,11 +203,11 @@ export function solveTwoBoneIK(input: TwoBoneIKInput): TwoBoneIKResult {
   // Linear component mapping only works for small angles and produces
   // wrong results for larger arm movements.
 
-  // T-pose arm direction in VRM/MediaPipe space
-  // Note: In mirrored view, person's left arm appears on right side of screen
-  // MediaPipe X increases left-to-right, so left arm points toward higher X (positive)
-  // and right arm points toward lower X (negative) when in T-pose
-  const tposeDir: Vector3 = isLeft ? { x: 1, y: 0, z: 0 } : { x: -1, y: 0, z: 0 }
+  // T-pose arm direction in VRM coordinate space
+  // VRM convention: Y-up, right-handed coordinate system
+  // Looking at avatar from front: left arm points toward -X, right arm points toward +X
+  // Note: Input coordinates should already be transformed to VRM space before calling this function
+  const tposeDir: Vector3 = isLeft ? { x: -1, y: 0, z: 0 } : { x: 1, y: 0, z: 0 }
 
   // Calculate axis-angle rotation from T-pose to target direction
   const dotProduct = dot(tposeDir, upperArmDir)

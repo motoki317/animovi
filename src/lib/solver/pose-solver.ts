@@ -98,15 +98,28 @@ function solveArmIK(
   calibration: ArmCalibration,
   isLeft: boolean
 ): { shoulder: { x: number; y: number; z: number }; elbow: { x: number; y: number; z: number } } {
-  // Update calibration if needed
-  updateCalibration(calibration, shoulder, elbow, wrist)
+  // Transform MediaPipe coordinates to VRM-compatible space
+  // MediaPipe: X left-to-right, Y top-to-bottom (down), Z negative toward camera
+  // VRM/IK: X right, Y up, Z toward viewer (positive toward camera)
+  const toVRMSpace = (p: PoseLandmark): Vector3 => ({
+    x: p.x,    // Keep X (correct in mirrored view)
+    y: -p.y,   // Flip Y (MediaPipe Y-down to VRM Y-up)
+    z: -p.z,   // Flip Z (MediaPipe negative-toward-camera to VRM positive-toward-viewer)
+  })
+
+  const shoulderVRM = toVRMSpace(shoulder)
+  const elbowVRM = toVRMSpace(elbow)
+  const wristVRM = toVRMSpace(wrist)
+
+  // Update calibration with transformed coordinates
+  updateCalibration(calibration, shoulderVRM, elbowVRM, wristVRM)
 
   // If not yet calibrated, use current frame's measurements
   let upperLen = calibration.upperArmLength
   let lowerLen = calibration.lowerArmLength
 
   if (!isCalibrated(calibration)) {
-    const lengths = calculateArmLengths(shoulder, elbow, wrist)
+    const lengths = calculateArmLengths(shoulderVRM, elbowVRM, wristVRM)
     upperLen = lengths.upperArmLength
     lowerLen = lengths.lowerArmLength
   }
@@ -119,13 +132,13 @@ function solveArmIK(
     }
   }
 
-  // Solve IK with wrist as target, elbow as pole hint
+  // Solve IK with transformed coordinates
   const result = solveTwoBoneIK({
-    shoulder,
-    target: wrist,
+    shoulder: shoulderVRM,
+    target: wristVRM,
     upperArmLength: upperLen,
     lowerArmLength: lowerLen,
-    poleHint: elbow,
+    poleHint: elbowVRM,
     isLeft,
   })
 
