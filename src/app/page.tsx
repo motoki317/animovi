@@ -4,19 +4,43 @@
  * HomePage - Main application page integrating all components.
  */
 
-import { useEffect, useCallback } from 'react'
-import { CameraProvider } from '../components/camera-provider'
+import { useEffect, useCallback, useRef } from 'react'
+import { CameraProvider, useCamera } from '../components/camera-provider'
 import { AvatarScene } from '../components/avatar-scene'
 import { SettingsPanel } from '../components/settings-panel'
 import { BackgroundSettings, type BackgroundConfig } from '../components/background-settings'
 import { useVRMLoader } from '../hooks/use-vrm-loader'
+import { useVRMTracking } from '../hooks/use-vrm-tracking'
 import { useSettingsStore } from '../stores/settings-store'
-import { useTrackingStore } from '../stores/tracking-store'
 
-export default function HomePage() {
+function HomePageContent() {
   const { vrm, loading: vrmLoading, loadFromFile } = useVRMLoader()
   const settings = useSettingsStore()
-  const _tracking = useTrackingStore()
+  const { stream } = useCamera()
+
+  // Video element for tracking
+  const videoRef = useRef<HTMLVideoElement>(null)
+
+  // Connect camera stream to video element
+  useEffect(() => {
+    if (videoRef.current && stream) {
+      videoRef.current.srcObject = stream
+      videoRef.current.play().catch(() => {
+        // Autoplay may be blocked, that's ok
+      })
+    }
+  }, [stream])
+
+  // Use VRM tracking
+  const { isTracking, isInitializing, error: trackingError } = useVRMTracking({
+    vrm,
+    videoRef,
+    enabled: settings.faceTrackingEnabled || settings.poseTrackingEnabled || settings.handTrackingEnabled,
+    smoothing: settings.smoothing,
+    faceTracking: settings.faceTrackingEnabled,
+    poseTracking: settings.poseTrackingEnabled,
+    handTracking: settings.handTrackingEnabled,
+  })
 
   // Handle keyboard shortcuts
   useEffect(() => {
@@ -65,11 +89,25 @@ export default function HomePage() {
   }, [setCameraY, setCameraZ])
 
   return (
-    <CameraProvider>
-      <main style={{ display: 'flex', height: '100vh', position: 'relative' }}>
-        {/* Avatar scene - full width when panel hidden */}
-        <div style={{ flex: 1 }}>
-          <AvatarScene
+    <main style={{ display: 'flex', height: '100vh', position: 'relative' }}>
+      {/* Hidden video element for tracking */}
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
+        style={{
+          position: 'absolute',
+          width: 1,
+          height: 1,
+          opacity: 0,
+          pointerEvents: 'none',
+        }}
+      />
+
+      {/* Avatar scene - full width when panel hidden */}
+      <div style={{ flex: 1 }}>
+        <AvatarScene
             vrm={vrm}
             backgroundType={settings.backgroundType}
             backgroundColor={settings.backgroundColor}
@@ -174,23 +212,49 @@ export default function HomePage() {
           </aside>
         )}
 
-        {/* Panel restore trigger zone - shown when panel is hidden */}
-        {!settings.panelVisible && (
-          <div
-            onMouseEnter={() => settings.setPanelVisible(true)}
-            style={{
-              position: 'absolute',
-              right: 0,
-              top: 0,
-              width: '20px',
-              height: '100%',
-              cursor: 'pointer',
-              background: 'linear-gradient(to right, transparent, rgba(255,255,255,0.1))',
-            }}
-            title="Show settings panel"
-          />
-        )}
-      </main>
+      {/* Panel restore trigger zone - shown when panel is hidden */}
+      {!settings.panelVisible && (
+        <div
+          onMouseEnter={() => settings.setPanelVisible(true)}
+          style={{
+            position: 'absolute',
+            right: 0,
+            top: 0,
+            width: '20px',
+            height: '100%',
+            cursor: 'pointer',
+            background: 'linear-gradient(to right, transparent, rgba(255,255,255,0.1))',
+          }}
+          title="Show settings panel"
+        />
+      )}
+
+      {/* Tracking status indicator */}
+      {(isInitializing || trackingError) && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: 10,
+            left: 10,
+            padding: '0.5rem 1rem',
+            background: trackingError ? 'rgba(255, 0, 0, 0.8)' : 'rgba(0, 0, 0, 0.7)',
+            color: 'white',
+            borderRadius: 4,
+            fontSize: '0.875rem',
+          }}
+        >
+          {isInitializing && 'Initializing tracking...'}
+          {trackingError && `Tracking error: ${trackingError.message}`}
+        </div>
+      )}
+    </main>
+  )
+}
+
+export default function HomePage() {
+  return (
+    <CameraProvider>
+      <HomePageContent />
     </CameraProvider>
   )
 }
