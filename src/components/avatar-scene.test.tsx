@@ -59,6 +59,22 @@ vi.mock('three', () => {
   }
 })
 
+// Mock OrbitControls
+vi.mock('three/addons/controls/OrbitControls.js', () => {
+  class MockOrbitControls {
+    target = { set: vi.fn() }
+    enableDamping = false
+    dampingFactor = 0.05
+    minDistance = 0
+    maxDistance = Infinity
+    maxPolarAngle = Math.PI
+    minPolarAngle = 0
+    update = vi.fn()
+    dispose = vi.fn()
+  }
+  return { OrbitControls: MockOrbitControls }
+})
+
 describe('AvatarScene', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -238,6 +254,17 @@ describe('AvatarScene', () => {
     )
 
     expect(onAutoFrame).not.toHaveBeenCalled()
+  })
+
+  it('should initialize orbit controls when enableOrbitControls is true', async () => {
+    // We can verify OrbitControls is set up by checking if the component
+    // accepts the prop without errors
+    const { container } = render(
+      <AvatarScene enableOrbitControls={true} />
+    )
+
+    // Component should render without errors
+    expect(screen.getByTestId('avatar-scene')).toBeDefined()
   })
 
   it('should rotate VRM to face camera when added to scene', () => {

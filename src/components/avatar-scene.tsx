@@ -6,6 +6,7 @@
 
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import type { VRM } from '@pixiv/three-vrm'
 import type { BackgroundType } from './background-settings'
 
@@ -17,6 +18,7 @@ interface AvatarSceneProps {
   cameraZ?: number
   autoFrameOnLoad?: boolean
   onAutoFrame?: (y: number, z: number) => void
+  enableOrbitControls?: boolean
 }
 
 export function AvatarScene({
@@ -27,11 +29,13 @@ export function AvatarScene({
   cameraZ = 1.5,
   autoFrameOnLoad = true,
   onAutoFrame,
+  enableOrbitControls = true,
 }: AvatarSceneProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
   const sceneRef = useRef<THREE.Scene | null>(null)
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null)
+  const controlsRef = useRef<OrbitControls | null>(null)
 
   // Store callback in ref to avoid dependency issues
   const onAutoFrameRef = useRef(onAutoFrame)
@@ -45,6 +49,7 @@ export function AvatarScene({
   const initialBackgroundColorRef = useRef(backgroundColor)
   const initialCameraYRef = useRef(cameraY)
   const initialCameraZRef = useRef(cameraZ)
+  const enableOrbitControlsRef = useRef(enableOrbitControls)
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -90,10 +95,25 @@ export function AvatarScene({
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.5)
     scene.add(ambientLight)
 
+    // Initialize orbit controls for camera manipulation
+    let controls: OrbitControls | null = null
+    if (enableOrbitControlsRef.current) {
+      controls = new OrbitControls(camera, renderer.domElement)
+      controls.target.set(0, initialCameraYRef.current, 0)
+      controls.enableDamping = true
+      controls.dampingFactor = 0.05
+      controls.minDistance = 0.5
+      controls.maxDistance = 5
+      controls.maxPolarAngle = Math.PI * 0.9 // Prevent flipping
+      controls.minPolarAngle = Math.PI * 0.1
+      controlsRef.current = controls
+    }
+
     // Animation loop
     let animationId: number
     function animate() {
       animationId = requestAnimationFrame(animate)
+      controls?.update() // Required for damping
       renderer.render(scene, camera)
     }
     animate()
@@ -112,6 +132,7 @@ export function AvatarScene({
     return () => {
       cancelAnimationFrame(animationId)
       window.removeEventListener('resize', handleResize)
+      controls?.dispose()
       renderer.dispose()
       containerRef.current?.removeChild(renderer.domElement)
     }
