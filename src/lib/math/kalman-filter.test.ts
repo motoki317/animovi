@@ -49,4 +49,20 @@ describe('KalmanFilter', () => {
     expect(smoothed.z).toBeGreaterThan(0)
     expect(smoothed.z).toBeLessThan(30)
   })
+
+  it('should return exact value after reset', () => {
+    const filter = new KalmanFilter()
+
+    // Build up internal state
+    filter.update(0)
+    filter.update(10)
+    filter.update(20)
+
+    // Reset clears state
+    filter.reset()
+
+    // After reset, first update should return exact value (no smoothing)
+    const result = filter.update(100)
+    expect(result).toBe(100)
+  })
 })

@@ -23,6 +23,10 @@ export class KalmanFilter {
     this.estimate = this.estimate + this.responsiveness * (value - this.estimate)
     return this.estimate
   }
+
+  reset(): void {
+    this.estimate = null
+  }
 }
 
 export interface Vector3 {
