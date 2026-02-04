@@ -58,4 +58,18 @@ describe('FaceSolver', () => {
     expect(result).not.toBeNull()
     expect(result!.head.pitch).toBeLessThan(-0.1)
   })
+
+  it('should detect left eye blink when eye is closed', () => {
+    const landmarks = createNeutralFaceLandmarks()
+    // Left eye landmarks (upper: 159, lower: 145) - close them
+    // Eye open: upper.y ~0.35, lower.y ~0.40 (5% gap)
+    // Eye closed: upper.y ~0.38, lower.y ~0.38 (0% gap)
+    landmarks[159] = { x: 0.35, y: 0.38, z: 0 } // upper lid down
+    landmarks[145] = { x: 0.35, y: 0.38, z: 0 } // lower lid up (closed)
+
+    const result = solveFace(landmarks)
+
+    expect(result).not.toBeNull()
+    expect(result!.eyes.leftBlink).toBeGreaterThan(0.5)
+  })
 })

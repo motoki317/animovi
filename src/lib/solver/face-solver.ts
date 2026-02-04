@@ -30,7 +30,12 @@ export interface FaceResult {
 const NOSE_TIP = 1
 const FOREHEAD = 10
 const CHIN = 152
+const LEFT_EYE_UPPER = 159
+const LEFT_EYE_LOWER = 145
+const RIGHT_EYE_UPPER = 386
+const RIGHT_EYE_LOWER = 374
 const CENTER_X = 0.5
+const EYE_OPEN_THRESHOLD = 0.02 // Typical open eye gap
 
 export function solveFace(landmarks: FaceLandmarks): FaceResult | null {
   if (landmarks.length === 0) {
@@ -48,9 +53,17 @@ export function solveFace(landmarks: FaceLandmarks): FaceResult | null {
   // Positive z difference (forehead forward) = head tilting down = negative pitch
   const pitch = (chin.z - forehead.z) * 5
 
+  // Calculate eye blink from eyelid distance
+  const leftEyeGap = landmarks[LEFT_EYE_LOWER].y - landmarks[LEFT_EYE_UPPER].y
+  const rightEyeGap = landmarks[RIGHT_EYE_LOWER].y - landmarks[RIGHT_EYE_UPPER].y
+
+  // Normalize: 0 = open (gap >= threshold), 1 = closed (gap = 0)
+  const leftBlink = Math.max(0, Math.min(1, 1 - leftEyeGap / EYE_OPEN_THRESHOLD))
+  const rightBlink = Math.max(0, Math.min(1, 1 - rightEyeGap / EYE_OPEN_THRESHOLD))
+
   return {
     head: { pitch, yaw, roll: 0 },
-    eyes: { leftBlink: 0, rightBlink: 0 },
+    eyes: { leftBlink, rightBlink },
     mouth: { open: 0, smile: 0 },
   }
 }
