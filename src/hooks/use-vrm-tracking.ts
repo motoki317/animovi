@@ -14,6 +14,8 @@ export interface UseVRMTrackingOptions {
   vrm: VRM | null
   /** Ref to the video element providing camera feed */
   videoRef: React.RefObject<HTMLVideoElement | null>
+  /** The camera MediaStream (used to trigger re-initialization when stream becomes available) */
+  stream?: MediaStream | null
   /** Whether tracking is enabled (default: true) */
   enabled?: boolean
   /** Smoothing factor 0-1 (default: 0.5) */
@@ -45,6 +47,7 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
   const {
     vrm,
     videoRef,
+    stream,
     enabled = true,
     smoothing = 0.5,
     targetFps = 30,
@@ -67,6 +70,9 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
   const frameInterval = 1000 / targetFps
 
   // Initialize MediaPipe tracker
+  // Note: We check videoRef.current directly in the effect body, and the effect
+  // re-runs when enabled or vrm change. For video availability, we rely on the
+  // parent component to trigger a re-render when the video becomes available.
   useEffect(() => {
     if (!enabled || !vrm || !videoRef.current) {
       return
@@ -118,7 +124,9 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
       cancelled = true
       cleanup()
     }
-  }, [enabled, vrm, videoRef.current !== null])
+  // Note: stream is used as a trigger to re-run when camera becomes available
+  // videoRef.current is checked in effect body
+  }, [enabled, vrm, stream])
 
   // Update bridge options when settings change
   useEffect(() => {

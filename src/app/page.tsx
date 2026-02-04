@@ -35,6 +35,7 @@ function HomePageContent() {
   const { isTracking, isInitializing, error: trackingError } = useVRMTracking({
     vrm,
     videoRef,
+    stream, // Pass stream so tracking can initialize when camera becomes available
     enabled: settings.faceTrackingEnabled || settings.poseTrackingEnabled || settings.handTrackingEnabled,
     smoothing: settings.smoothing,
     faceTracking: settings.faceTrackingEnabled,

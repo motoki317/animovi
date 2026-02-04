@@ -7,28 +7,30 @@ import { renderHook, act } from '@testing-library/react'
 import { useVRMTracking } from './use-vrm-tracking'
 
 // Mock MediaPipe
-vi.mock('../lib/mediapipe/tracker', () => ({
-  MediaPipeTracker: vi.fn().mockImplementation(() => ({
-    initialize: vi.fn().mockResolvedValue(undefined),
-    isReady: vi.fn().mockReturnValue(true),
-    detectLandmarks: vi.fn().mockReturnValue({
+vi.mock('../lib/mediapipe/tracker', () => {
+  class MockMediaPipeTracker {
+    initialize = vi.fn().mockResolvedValue(undefined)
+    isReady = vi.fn().mockReturnValue(true)
+    detectLandmarks = vi.fn().mockReturnValue({
       faceLandmarks: [[{ x: 0.5, y: 0.5, z: 0 }]],
       poseLandmarks: [[{ x: 0.5, y: 0.5, z: 0 }]],
       leftHandLandmarks: [],
       rightHandLandmarks: [],
-    }),
-    dispose: vi.fn().mockResolvedValue(undefined),
-  })),
-}))
+    })
+    dispose = vi.fn().mockResolvedValue(undefined)
+  }
+  return { MediaPipeTracker: MockMediaPipeTracker }
+})
 
 // Mock TrackingBridge
-vi.mock('../lib/vrm/tracking-bridge', () => ({
-  TrackingBridge: vi.fn().mockImplementation(() => ({
-    update: vi.fn(),
-    setSmoothing: vi.fn(),
-    dispose: vi.fn(),
-  })),
-}))
+vi.mock('../lib/vrm/tracking-bridge', () => {
+  class MockTrackingBridge {
+    update = vi.fn()
+    setSmoothing = vi.fn()
+    dispose = vi.fn()
+  }
+  return { TrackingBridge: MockTrackingBridge }
+})
 
 // Mock HolisticSolver
 vi.mock('../lib/solver/holistic-solver', () => ({
@@ -72,6 +74,9 @@ describe('useVRMTracking', () => {
     } as HTMLVideoElement,
   }
 
+  // Mock MediaStream
+  const mockStream = {} as MediaStream
+
   beforeEach(() => {
     vi.clearAllMocks()
   })
@@ -81,6 +86,7 @@ describe('useVRMTracking', () => {
       useVRMTracking({
         vrm: mockVRM as never,
         videoRef: mockVideoRef,
+        stream: mockStream,
         enabled: true,
       })
     )
@@ -95,11 +101,39 @@ describe('useVRMTracking', () => {
     expect(typeof result.current.stop).toBe('function')
   })
 
+  it('should start tracking when all prerequisites are met (vrm, video, stream, enabled)', async () => {
+    const { result } = renderHook(() =>
+      useVRMTracking({
+        vrm: mockVRM as never,
+        videoRef: mockVideoRef,
+        stream: mockStream,
+        enabled: true,
+      })
+    )
+
+    // Allow effects to run
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 50))
+    })
+
+    // Should start initializing immediately since all prereqs are met
+    await vi.waitFor(() => {
+      // Either initializing or already tracking
+      expect(result.current.isInitializing || result.current.isTracking).toBe(true)
+    }, { timeout: 500 })
+
+    // Should eventually be tracking
+    await vi.waitFor(() => {
+      expect(result.current.isTracking).toBe(true)
+    }, { timeout: 1000 })
+  })
+
   it('should not initialize when disabled', () => {
     const { result } = renderHook(() =>
       useVRMTracking({
         vrm: mockVRM as never,
         videoRef: mockVideoRef,
+        stream: mockStream,
         enabled: false,
       })
     )
@@ -113,10 +147,58 @@ describe('useVRMTracking', () => {
       useVRMTracking({
         vrm: null,
         videoRef: mockVideoRef,
+        stream: mockStream,
         enabled: true,
       })
     )
 
     expect(result.current.isTracking).toBe(false)
+  })
+
+  it('should not initialize when videoRef.current is null', () => {
+    const nullVideoRef = { current: null }
+
+    const { result } = renderHook(() =>
+      useVRMTracking({
+        vrm: mockVRM as never,
+        videoRef: nullVideoRef,
+        stream: mockStream,
+        enabled: true,
+      })
+    )
+
+    expect(result.current.isTracking).toBe(false)
+    expect(result.current.isInitializing).toBe(false)
+  })
+
+  it('should re-initialize tracking when stream changes', async () => {
+    // Simulates the scenario where the camera stream is updated
+    // (e.g., user switches camera or grants permission later)
+    let currentStream: MediaStream | null = {} as MediaStream
+
+    const { result, rerender } = renderHook(
+      ({ stream }) =>
+        useVRMTracking({
+          vrm: mockVRM as never,
+          videoRef: mockVideoRef,
+          stream,
+          enabled: true,
+        }),
+      { initialProps: { stream: currentStream } }
+    )
+
+    // Should eventually be tracking
+    await vi.waitFor(() => {
+      expect(result.current.isTracking).toBe(true)
+    }, { timeout: 500 })
+
+    // Simulate stream changing (e.g., new camera selected)
+    const newStream = {} as MediaStream
+    rerender({ stream: newStream })
+
+    // Should still be tracking after stream change
+    await vi.waitFor(() => {
+      expect(result.current.isTracking).toBe(true)
+    }, { timeout: 500 })
   })
 })
