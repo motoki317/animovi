@@ -9,6 +9,7 @@ import { MediaPipeTracker } from '../lib/mediapipe/tracker'
 import { TrackingBridge } from '../lib/vrm/tracking-bridge'
 import { solveHolistic, type HolisticResult } from '../lib/solver/holistic-solver'
 import { isVideoReady, waitForVideoReady } from '../lib/capture/video-readiness'
+import { useTrackingStore, type PipelineState } from '../stores/tracking-store'
 
 export interface UseVRMTrackingOptions {
   /** The VRM model to animate */
@@ -70,6 +71,38 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
   const isRunningRef = useRef(false)
   const lastFrameTimeRef = useRef(0)
 
+  // Helper to emit debug data - reads debugEnabled fresh from store to avoid stale closure
+  const emitDebugData = useCallback((
+    pipelineState: PipelineState,
+    mediaPipeResult: ReturnType<MediaPipeTracker['detectLandmarks']> | null,
+    solved: HolisticResult | null,
+    elapsed: number,
+    timestamp: number,
+    errorMsg: string | null
+  ) => {
+    // Read fresh from store to avoid stale closure issues
+    const { debugEnabled, setDebugData } = useTrackingStore.getState()
+    if (!debugEnabled) return
+    setDebugData({
+      pipelineState,
+      detection: {
+        hasFace: !!(mediaPipeResult?.faceLandmarks?.[0]?.length),
+        hasPose: !!(mediaPipeResult?.poseLandmarks?.[0]?.length),
+        hasLeftHand: !!(mediaPipeResult?.leftHandLandmarks?.[0]?.length),
+        hasRightHand: !!(mediaPipeResult?.rightHandLandmarks?.[0]?.length),
+        faceLandmarkCount: mediaPipeResult?.faceLandmarks?.[0]?.length ?? 0,
+        poseLandmarkCount: mediaPipeResult?.poseLandmarks?.[0]?.length ?? 0,
+      },
+      solved,
+      performance: {
+        fps: elapsed > 0 ? 1000 / elapsed : 0,
+        frameTimeMs: elapsed,
+      },
+      lastUpdateTime: timestamp,
+      error: errorMsg,
+    })
+  }, [])
+
   // Frame interval based on target FPS
   const frameInterval = 1000 / targetFps
 
@@ -77,7 +110,17 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
   // This effect waits for video to be ready before starting tracking,
   // solving the race condition where tracking could start before video has data.
   useEffect(() => {
-    if (!enabled || !vrm || !videoRef.current) {
+    // Emit diagnostic info about why tracking might not start
+    if (!enabled) {
+      emitDebugData('idle', null, null, 0, Date.now(), 'Tracking disabled')
+      return
+    }
+    if (!vrm) {
+      emitDebugData('idle', null, null, 0, Date.now(), 'No VRM loaded')
+      return
+    }
+    if (!videoRef.current) {
+      emitDebugData('idle', null, null, 0, Date.now(), 'No video element')
       return
     }
 
@@ -88,6 +131,7 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
       setIsInitializing(true)
       setIsWaitingForVideo(false)
       setError(null)
+      emitDebugData('initializing', null, null, 0, Date.now(), 'Initializing MediaPipe...')
 
       try {
         // Create tracker (can initialize while waiting for video)
@@ -100,6 +144,7 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
         }
 
         trackerRef.current = tracker
+        emitDebugData('initializing', null, null, 0, Date.now(), 'MediaPipe ready, creating bridge...')
 
         // Create bridge (vrm is guaranteed non-null here due to guard at start of effect)
         bridgeRef.current = new TrackingBridge(vrm!, {
@@ -114,12 +159,16 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
         // Wait for video to be ready before starting tracking loop
         if (!isVideoReady(video)) {
           setIsWaitingForVideo(true)
+          emitDebugData('waiting-video', null, null, 0, Date.now(),
+            `Video not ready: readyState=${video.readyState}, dimensions=${video.videoWidth}x${video.videoHeight}`)
           try {
             await waitForVideoReady(video, { timeout: 30000 })
           } catch (waitErr) {
             if (!cancelled) {
+              const errMsg = waitErr instanceof Error ? waitErr.message : String(waitErr)
               setError(waitErr instanceof Error ? waitErr : new Error(String(waitErr)))
               setIsWaitingForVideo(false)
+              emitDebugData('error', null, null, 0, Date.now(), `Video wait failed: ${errMsg}`)
             }
             return
           }
@@ -130,14 +179,17 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
         setIsWaitingForVideo(false)
         setIsTracking(true)
         isRunningRef.current = true
+        emitDebugData('tracking', null, null, 0, Date.now(), 'Starting tracking loop...')
 
         // Start tracking loop
         startTrackingLoop()
       } catch (err) {
         if (!cancelled) {
+          const errMsg = err instanceof Error ? err.message : String(err)
           setError(err instanceof Error ? err : new Error(String(err)))
           setIsInitializing(false)
           setIsWaitingForVideo(false)
+          emitDebugData('error', null, null, 0, Date.now(), `Init failed: ${errMsg}`)
         }
       }
     }
@@ -150,7 +202,8 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
     }
   // Note: stream is used as a trigger to re-run when camera becomes available
   // videoRef.current is checked in effect body
-  }, [enabled, vrm, stream])
+  // emitDebugData has stable reference (empty deps) so won't cause re-runs
+  }, [enabled, vrm, stream, emitDebugData])
 
   // Update bridge options when settings change
   useEffect(() => {
@@ -201,16 +254,23 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
 
           // Apply to VRM
           bridge.update(result)
+
+          // Emit debug data
+          emitDebugData('tracking', mediaPipeResult, result, elapsed, timestamp, null)
+        } else {
+          // No detection result
+          emitDebugData('tracking', null, null, elapsed, timestamp, null)
         }
       } catch (err) {
         console.warn('Tracking frame error:', err)
+        emitDebugData('error', null, null, elapsed, timestamp, err instanceof Error ? err.message : String(err))
       }
 
       rafIdRef.current = requestAnimationFrame(loop)
     }
 
     rafIdRef.current = requestAnimationFrame(loop)
-  }, [frameInterval, videoRef])
+  }, [frameInterval, videoRef, emitDebugData])
 
   const cleanup = useCallback(() => {
     isRunningRef.current = false

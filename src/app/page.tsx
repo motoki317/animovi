@@ -9,14 +9,18 @@ import { CameraProvider, useCamera } from '../components/camera-provider'
 import { AvatarScene } from '../components/avatar-scene'
 import { SettingsPanel } from '../components/settings-panel'
 import { BackgroundSettings, type BackgroundConfig } from '../components/background-settings'
+import { TrackingDebugOverlay } from '../components/tracking-debug-overlay'
 import { useVRMLoader } from '../hooks/use-vrm-loader'
 import { useVRMTracking } from '../hooks/use-vrm-tracking'
 import { useSettingsStore } from '../stores/settings-store'
+import { useTrackingStore } from '../stores/tracking-store'
 
 function HomePageContent() {
   const { vrm, loading: vrmLoading, loadFromFile } = useVRMLoader()
   const settings = useSettingsStore()
   const { stream } = useCamera()
+  const debugEnabled = useTrackingStore((s) => s.debugEnabled)
+  const setDebugEnabled = useTrackingStore((s) => s.setDebugEnabled)
 
   // Video element for tracking
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -46,19 +50,25 @@ function HomePageContent() {
   // Handle keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger if typing in an input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return
+      }
+
       // H key to toggle panel
       if (e.key === 'h' || e.key === 'H') {
-        // Don't trigger if typing in an input
-        if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-          return
-        }
         settings.togglePanel()
+      }
+
+      // D key to toggle debug overlay
+      if (e.key === 'd' || e.key === 'D') {
+        setDebugEnabled(!debugEnabled)
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [settings])
+  }, [settings, debugEnabled, setDebugEnabled])
 
   // Get stable setter references from the store
   const {
@@ -229,6 +239,9 @@ function HomePageContent() {
           title="Show settings panel"
         />
       )}
+
+      {/* Debug overlay - toggle with 'D' key */}
+      <TrackingDebugOverlay />
 
       {/* Tracking status indicator */}
       {(isInitializing || isWaitingForVideo || trackingError) && (

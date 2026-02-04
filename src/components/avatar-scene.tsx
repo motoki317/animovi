@@ -36,6 +36,11 @@ export function AvatarScene({
   const sceneRef = useRef<THREE.Scene | null>(null)
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null)
   const controlsRef = useRef<OrbitControls | null>(null)
+  const clockRef = useRef<THREE.Clock | null>(null)
+
+  // Store VRM in ref so animation loop can access it
+  const vrmRef = useRef<VRM | null>(null)
+  vrmRef.current = vrm ?? null
 
   // Store callback in ref to avoid dependency issues
   const onAutoFrameRef = useRef(onAutoFrame)
@@ -109,11 +114,21 @@ export function AvatarScene({
       controlsRef.current = controls
     }
 
-    // Animation loop
+    // Animation loop with VRM update
+    const clock = new THREE.Clock()
+    clockRef.current = clock
     let animationId: number
     function animate() {
       animationId = requestAnimationFrame(animate)
+      const deltaTime = clock.getDelta()
+
       controls?.update() // Required for damping
+
+      // Update VRM (required for expressions, spring bones, and constraints)
+      if (vrmRef.current) {
+        vrmRef.current.update(deltaTime)
+      }
+
       renderer.render(scene, camera)
     }
     animate()

@@ -38,6 +38,9 @@ const UPPER_LIP = 13
 const LOWER_LIP = 14
 const MOUTH_LEFT = 61
 const MOUTH_RIGHT = 291
+// Landmarks for roll calculation (outer eye corners)
+const LEFT_EYE_OUTER = 33
+const RIGHT_EYE_OUTER = 263
 const CENTER_X = 0.5
 const EYE_OPEN_THRESHOLD = 0.02 // Typical open eye gap
 const MOUTH_OPEN_THRESHOLD = 0.1 // Max mouth opening
@@ -52,13 +55,20 @@ export function solveFace(landmarks: FaceLandmarks): FaceResult | null {
   const nose = landmarks[NOSE_TIP]
   const forehead = landmarks[FOREHEAD]
   const chin = landmarks[CHIN]
+  const leftEyeOuter = landmarks[LEFT_EYE_OUTER]
+  const rightEyeOuter = landmarks[RIGHT_EYE_OUTER]
 
   // Calculate yaw from nose position relative to center
+  // Nose moving left (smaller x) = head turning right = positive yaw
   const yaw = (CENTER_X - nose.x) * 2
 
   // Calculate pitch from forehead-chin z difference
-  // Positive z difference (forehead forward) = head tilting down = negative pitch
+  // Forehead forward (larger z) relative to chin = head tilting down = negative pitch
   const pitch = (chin.z - forehead.z) * 5
+
+  // Calculate roll from eye corner y-positions
+  // Left eye higher than right = head tilting right = positive roll
+  const roll = (rightEyeOuter.y - leftEyeOuter.y) * 4
 
   // Calculate eye blink from eyelid distance
   const leftEyeGap = landmarks[LEFT_EYE_LOWER].y - landmarks[LEFT_EYE_UPPER].y
@@ -78,7 +88,7 @@ export function solveFace(landmarks: FaceLandmarks): FaceResult | null {
   const smile = Math.max(0, Math.min(1, smileRatio))
 
   return {
-    head: { pitch, yaw, roll: 0 },
+    head: { pitch, yaw, roll },
     eyes: { leftBlink, rightBlink },
     mouth: { open: mouthOpen, smile },
   }

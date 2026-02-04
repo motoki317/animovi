@@ -46,6 +46,9 @@ vi.mock('three', () => {
     getCenter = vi.fn().mockReturnValue(new MockVector3())
     getSize = vi.fn().mockReturnValue(new MockVector3())
   }
+  class MockClock {
+    getDelta = vi.fn().mockReturnValue(0.016) // ~60fps
+  }
 
   return {
     Scene: MockScene,
@@ -56,6 +59,7 @@ vi.mock('three', () => {
     Color: MockColor,
     Vector3: MockVector3,
     Box3: MockBox3,
+    Clock: MockClock,
   }
 })
 
@@ -154,6 +158,7 @@ describe('AvatarScene', () => {
           }),
         }),
       },
+      update: vi.fn(),
     }
 
     const { rerender } = render(
@@ -193,6 +198,7 @@ describe('AvatarScene', () => {
           }),
         }),
       },
+      update: vi.fn(),
     }
 
     const mockVRM2 = {
@@ -205,6 +211,7 @@ describe('AvatarScene', () => {
           }),
         }),
       },
+      update: vi.fn(),
     }
 
     const { rerender } = render(
@@ -243,6 +250,7 @@ describe('AvatarScene', () => {
           }),
         }),
       },
+      update: vi.fn(),
     }
 
     render(
@@ -281,6 +289,7 @@ describe('AvatarScene', () => {
           }),
         }),
       },
+      update: vi.fn(),
     }
 
     render(<AvatarScene vrm={mockVRM as never} />)
@@ -303,6 +312,7 @@ describe('AvatarScene', () => {
           }),
         }),
       },
+      update: vi.fn(),
     }
 
     // Initial render

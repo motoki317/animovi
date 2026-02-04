@@ -52,8 +52,13 @@ export class TrackingBridge {
       this.applyFaceTracking(results.face)
     }
 
-    if (this.options.poseTracking && results.pose) {
-      this.applyPoseTracking(results.pose)
+    if (this.options.poseTracking) {
+      if (results.pose) {
+        this.applyPoseTracking(results.pose)
+      } else {
+        // Apply natural "arms down" pose when tracking not available
+        this.applyDefaultArmPose()
+      }
     }
 
     if (this.options.handTracking) {
@@ -64,6 +69,30 @@ export class TrackingBridge {
         this.applyHandTracking('right', results.rightHand)
       }
     }
+  }
+
+  /**
+   * Apply a natural "arms down" pose (relaxed standing position)
+   */
+  private applyDefaultArmPose(): void {
+    // Arms naturally hang down from T-pose
+    // Left arm: positive Z rotation lowers it
+    // Right arm: negative Z rotation lowers it
+    const armsDownAngle = Math.PI / 2.5 // About 72 degrees down from horizontal
+
+    this.applyArmBone('leftUpperArm', {
+      pitch: 0,
+      yaw: 0,
+      roll: armsDownAngle,
+    })
+    this.applyArmBone('rightUpperArm', {
+      pitch: 0,
+      yaw: 0,
+      roll: -armsDownAngle,
+    })
+    // Keep lower arms straight
+    this.applyArmBone('leftLowerArm', { pitch: 0, yaw: 0, roll: 0 })
+    this.applyArmBone('rightLowerArm', { pitch: 0, yaw: 0, roll: 0 })
   }
 
   /**

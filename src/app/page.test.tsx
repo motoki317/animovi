@@ -72,14 +72,23 @@ vi.mock('../stores/settings-store', () => ({
   }),
 }))
 
-vi.mock('../stores/tracking-store', () => ({
-  useTrackingStore: () => ({
+vi.mock('../stores/tracking-store', () => {
+  const state = {
     isTracking: false,
     result: null,
+    debugData: null,
+    debugEnabled: false,
     setTracking: vi.fn(),
     setResult: vi.fn(),
-  }),
-}))
+    setDebugData: vi.fn(),
+    setDebugEnabled: vi.fn(),
+  }
+  const useTrackingStore = (selector?: (state: typeof state) => unknown) => {
+    return selector ? selector(state) : state
+  }
+  useTrackingStore.getState = () => state
+  return { useTrackingStore }
+})
 
 describe('HomePage', () => {
   beforeEach(() => {
