@@ -201,4 +201,101 @@ describe('useVRMTracking', () => {
       expect(result.current.isTracking).toBe(true)
     }, { timeout: 500 })
   })
+
+  it('should indicate waiting for video state when video is not ready', async () => {
+    // Video element exists but isn't ready (no source/data yet)
+    const unreadyVideoRef = {
+      current: {
+        readyState: 0,
+        videoWidth: 0,
+        videoHeight: 0,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      } as unknown as HTMLVideoElement,
+    }
+
+    const { result } = renderHook(() =>
+      useVRMTracking({
+        vrm: mockVRM as never,
+        videoRef: unreadyVideoRef,
+        stream: mockStream,
+        enabled: true,
+      })
+    )
+
+    // Allow effects to run
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 50))
+    })
+
+    // Should indicate waiting for video
+    await vi.waitFor(() => {
+      expect(result.current.isWaitingForVideo).toBe(true)
+    }, { timeout: 500 })
+
+    // Should not be actively tracking yet
+    expect(result.current.isTracking).toBe(false)
+  })
+
+  it('should transition from waiting to tracking when video becomes ready', async () => {
+    // Start with video not ready
+    let readyState = 0
+    let videoWidth = 0
+    const listeners: Record<string, EventListener[]> = {
+      loadeddata: [],
+      canplay: [],
+    }
+
+    const videoRef = {
+      current: {
+        get readyState() { return readyState },
+        get videoWidth() { return videoWidth },
+        videoHeight: 0,
+        addEventListener: (event: string, listener: EventListener) => {
+          if (!listeners[event]) listeners[event] = []
+          listeners[event].push(listener)
+        },
+        removeEventListener: (event: string, listener: EventListener) => {
+          if (listeners[event]) {
+            listeners[event] = listeners[event].filter(l => l !== listener)
+          }
+        },
+      } as unknown as HTMLVideoElement,
+    }
+
+    const { result } = renderHook(() =>
+      useVRMTracking({
+        vrm: mockVRM as never,
+        videoRef,
+        stream: mockStream,
+        enabled: true,
+      })
+    )
+
+    // Allow effects to run
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 50))
+    })
+
+    // Should be waiting for video
+    await vi.waitFor(() => {
+      expect(result.current.isWaitingForVideo).toBe(true)
+    }, { timeout: 500 })
+
+    // Simulate video becoming ready
+    readyState = 4
+    videoWidth = 640
+
+    // Trigger the loadeddata event
+    await act(async () => {
+      listeners.loadeddata?.forEach(listener => listener(new Event('loadeddata')))
+      await new Promise(resolve => setTimeout(resolve, 50))
+    })
+
+    // Should now be tracking
+    await vi.waitFor(() => {
+      expect(result.current.isTracking).toBe(true)
+      expect(result.current.isWaitingForVideo).toBe(false)
+    }, { timeout: 500 })
+  })
 })

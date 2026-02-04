@@ -32,7 +32,7 @@ function HomePageContent() {
   }, [stream])
 
   // Use VRM tracking
-  const { isTracking, isInitializing, error: trackingError } = useVRMTracking({
+  const { isTracking, isInitializing, isWaitingForVideo, error: trackingError } = useVRMTracking({
     vrm,
     videoRef,
     stream, // Pass stream so tracking can initialize when camera becomes available
@@ -231,7 +231,7 @@ function HomePageContent() {
       )}
 
       {/* Tracking status indicator */}
-      {(isInitializing || trackingError) && (
+      {(isInitializing || isWaitingForVideo || trackingError) && (
         <div
           style={{
             position: 'absolute',
@@ -245,6 +245,7 @@ function HomePageContent() {
           }}
         >
           {isInitializing && 'Initializing tracking...'}
+          {isWaitingForVideo && 'Waiting for camera...'}
           {trackingError && `Tracking error: ${trackingError.message}`}
         </div>
       )}

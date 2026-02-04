@@ -8,6 +8,7 @@ import type { VRM } from '@pixiv/three-vrm'
 import { MediaPipeTracker } from '../lib/mediapipe/tracker'
 import { TrackingBridge } from '../lib/vrm/tracking-bridge'
 import { solveHolistic, type HolisticResult } from '../lib/solver/holistic-solver'
+import { isVideoReady, waitForVideoReady } from '../lib/capture/video-readiness'
 
 export interface UseVRMTrackingOptions {
   /** The VRM model to animate */
@@ -31,10 +32,12 @@ export interface UseVRMTrackingOptions {
 }
 
 export interface UseVRMTrackingResult {
-  /** Whether tracking is currently active */
+  /** Whether tracking is currently active (processing frames) */
   isTracking: boolean
   /** Whether MediaPipe is initializing */
   isInitializing: boolean
+  /** Whether waiting for video element to become ready */
+  isWaitingForVideo: boolean
   /** Any error that occurred */
   error: Error | null
   /** Manually start tracking */
@@ -58,6 +61,7 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
 
   const [isTracking, setIsTracking] = useState(false)
   const [isInitializing, setIsInitializing] = useState(false)
+  const [isWaitingForVideo, setIsWaitingForVideo] = useState(false)
   const [error, setError] = useState<Error | null>(null)
 
   const trackerRef = useRef<MediaPipeTracker | null>(null)
@@ -70,22 +74,23 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
   const frameInterval = 1000 / targetFps
 
   // Initialize MediaPipe tracker
-  // Note: We check videoRef.current directly in the effect body, and the effect
-  // re-runs when enabled or vrm change. For video availability, we rely on the
-  // parent component to trigger a re-render when the video becomes available.
+  // This effect waits for video to be ready before starting tracking,
+  // solving the race condition where tracking could start before video has data.
   useEffect(() => {
     if (!enabled || !vrm || !videoRef.current) {
       return
     }
 
+    const video = videoRef.current
     let cancelled = false
 
     async function init() {
       setIsInitializing(true)
+      setIsWaitingForVideo(false)
       setError(null)
 
       try {
-        // Create tracker
+        // Create tracker (can initialize while waiting for video)
         const tracker = new MediaPipeTracker()
         await tracker.initialize()
 
@@ -105,6 +110,24 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
         })
 
         setIsInitializing(false)
+
+        // Wait for video to be ready before starting tracking loop
+        if (!isVideoReady(video)) {
+          setIsWaitingForVideo(true)
+          try {
+            await waitForVideoReady(video, { timeout: 30000 })
+          } catch (waitErr) {
+            if (!cancelled) {
+              setError(waitErr instanceof Error ? waitErr : new Error(String(waitErr)))
+              setIsWaitingForVideo(false)
+            }
+            return
+          }
+        }
+
+        if (cancelled) return
+
+        setIsWaitingForVideo(false)
         setIsTracking(true)
         isRunningRef.current = true
 
@@ -114,6 +137,7 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
         if (!cancelled) {
           setError(err instanceof Error ? err : new Error(String(err)))
           setIsInitializing(false)
+          setIsWaitingForVideo(false)
         }
       }
     }
@@ -207,6 +231,7 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
     }
 
     setIsTracking(false)
+    setIsWaitingForVideo(false)
   }, [])
 
   const start = useCallback(() => {
@@ -229,6 +254,7 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
   return {
     isTracking,
     isInitializing,
+    isWaitingForVideo,
     error,
     start,
     stop,
