@@ -35,4 +35,15 @@ describe('FaceSolver', () => {
     expect(result!.head.yaw).toBeCloseTo(0, 1)
     expect(result!.head.roll).toBeCloseTo(0, 1)
   })
+
+  it('should detect positive yaw when face turns right', () => {
+    const landmarks = createNeutralFaceLandmarks()
+    // Shift nose to the left in image (face turned right from camera's view)
+    landmarks[1] = { x: 0.3, y: 0.5, z: 0.02 }
+
+    const result = solveFace(landmarks)
+
+    expect(result).not.toBeNull()
+    expect(result!.head.yaw).toBeGreaterThan(0.1)
+  })
 })
