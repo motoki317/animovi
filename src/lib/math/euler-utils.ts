@@ -39,3 +39,10 @@ export function quaternionToEuler(q: Quaternion): Euler {
 
   return { x: roll, y: pitch, z: yaw }
 }
+
+/**
+ * Clamp an angle to a specified range.
+ */
+export function clampAngle(angle: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, angle))
+}
