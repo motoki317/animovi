@@ -182,6 +182,35 @@ The "N" icon visible in screenshots is likely a **browser extension** (e.g., Not
 
 ---
 
+## Known Issues
+
+### Arm Tracking Accuracy (2026-02-05)
+
+**Status:** Partially working, needs investigation
+
+**Current State:**
+- Implemented ZYX Euler order for VRM bones
+- Replaced IK with KalidoKit-style direct vector-to-euler approach
+- Arms no longer rotate violently
+- Arms do respond to movement
+
+**Remaining Issues:**
+- Arm rotation and locations still not quite correct
+- Elbows appear stiff (may not be bending visibly)
+- Need to compare against KalidoKit's actual implementation more closely
+
+**Potential Causes:**
+1. Coordinate system transformation might still have issues
+2. KalidoKit uses scaling factors and clamping we haven't implemented
+3. May need to look at how other projects handle the shoulder-elbow-wrist chain
+
+**Files Involved:**
+- `src/lib/math/two-bone-ik.ts` - solveArmDirect()
+- `src/lib/solver/pose-solver.ts` - toVRMSpace(), solveArm()
+- `src/lib/vrm/tracking-bridge.ts` - applyArmBone()
+
+---
+
 ## Phase 13: Solver Improvements
 
 **Goal:** Complete the partially implemented solvers.

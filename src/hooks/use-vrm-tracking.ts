@@ -223,6 +223,17 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
     }
   }, [smoothing])
 
+  // Update tracking feature toggles when settings change
+  useEffect(() => {
+    if (bridgeRef.current) {
+      bridgeRef.current.setOptions({
+        faceTracking,
+        poseTracking,
+        handTracking,
+      })
+    }
+  }, [faceTracking, poseTracking, handTracking])
+
   const startTrackingLoop = useCallback(() => {
     function loop(timestamp: number) {
       if (!isRunningRef.current) return
