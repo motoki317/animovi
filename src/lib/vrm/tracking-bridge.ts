@@ -119,7 +119,8 @@ export class TrackingBridge {
       headBone.rotation.set(
         smoothedRotation.pitch,
         smoothedRotation.yaw,
-        smoothedRotation.roll
+        smoothedRotation.roll,
+        'ZYX'
       )
     }
 
@@ -140,7 +141,8 @@ export class TrackingBridge {
       spineBone.rotation.set(
         smoothedRotation.pitch,
         smoothedRotation.yaw,
-        smoothedRotation.roll
+        smoothedRotation.roll,
+        'ZYX'
       )
     }
 
@@ -174,7 +176,8 @@ export class TrackingBridge {
       bone.rotation.set(
         smoothedRotation.pitch,
         smoothedRotation.yaw,
-        smoothedRotation.roll
+        smoothedRotation.roll,
+        'ZYX'
       )
     }
   }

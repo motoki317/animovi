@@ -164,6 +164,95 @@ describe('TrackingBridge', () => {
     expect(mockVrm.humanoid.getNormalizedBoneNode).toHaveBeenCalled()
   })
 
+  describe('Euler order (VRM compatibility)', () => {
+    it('should use ZYX Euler order for head rotation', () => {
+      const mockRotationSet = vi.fn()
+      mockVrm.humanoid.getNormalizedBoneNode = vi.fn().mockReturnValue({
+        rotation: { set: mockRotationSet, x: 0, y: 0, z: 0 },
+      })
+
+      const trackingResult: HolisticResult = {
+        face: {
+          head: { pitch: 0.1, yaw: 0.2, roll: 0.05 },
+          eyes: { leftBlink: 0, rightBlink: 0 },
+          mouth: { open: 0, smile: 0 },
+        },
+        pose: null,
+        leftHand: null,
+        rightHand: null,
+      }
+
+      bridge.update(trackingResult)
+
+      // Should be called with ZYX order as 4th argument
+      expect(mockRotationSet).toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        expect.any(Number),
+        'ZYX'
+      )
+    })
+
+    it('should use ZYX Euler order for spine rotation', () => {
+      const mockRotationSet = vi.fn()
+      mockVrm.humanoid.getNormalizedBoneNode = vi.fn().mockReturnValue({
+        rotation: { set: mockRotationSet, x: 0, y: 0, z: 0 },
+      })
+
+      const trackingResult: HolisticResult = {
+        face: null,
+        pose: {
+          spine: { pitch: 0.1, yaw: 0, roll: 0 },
+          leftArm: { shoulder: { x: 0, y: 0, z: 0 }, elbow: { x: 0, y: 0, z: 0 } },
+          rightArm: { shoulder: { x: 0, y: 0, z: 0 }, elbow: { x: 0, y: 0, z: 0 } },
+        },
+        leftHand: null,
+        rightHand: null,
+      }
+
+      bridge.update(trackingResult)
+
+      // All rotation.set calls should include 'ZYX'
+      const calls = mockRotationSet.mock.calls
+      expect(calls.length).toBeGreaterThan(0)
+      for (const call of calls) {
+        expect(call[3]).toBe('ZYX')
+      }
+    })
+
+    it('should use ZYX Euler order for arm bone rotations', () => {
+      const mockRotationSet = vi.fn()
+      mockVrm.humanoid.getNormalizedBoneNode = vi.fn().mockReturnValue({
+        rotation: { set: mockRotationSet, x: 0, y: 0, z: 0 },
+      })
+
+      const trackingResult: HolisticResult = {
+        face: null,
+        pose: {
+          spine: { pitch: 0, yaw: 0, roll: 0 },
+          leftArm: { shoulder: { x: 0.5, y: 0.3, z: 0.1 }, elbow: { x: -0.5, y: 0, z: 0 } },
+          rightArm: { shoulder: { x: 0.5, y: -0.3, z: -0.1 }, elbow: { x: -0.5, y: 0, z: 0 } },
+        },
+        leftHand: null,
+        rightHand: null,
+      }
+
+      bridge.update(trackingResult)
+
+      // Find arm-related calls (should be leftUpperArm, rightUpperArm, leftLowerArm, rightLowerArm)
+      const armBoneNames = ['leftUpperArm', 'rightUpperArm', 'leftLowerArm', 'rightLowerArm']
+      const getBoneCalls = (mockVrm.humanoid.getNormalizedBoneNode as ReturnType<typeof vi.fn>).mock.calls
+      const armCalls = getBoneCalls.filter((call: string[]) => armBoneNames.includes(call[0]))
+      expect(armCalls.length).toBe(4)
+
+      // All rotation.set calls should use 'ZYX' order
+      const calls = mockRotationSet.mock.calls
+      for (const call of calls) {
+        expect(call[3]).toBe('ZYX')
+      }
+    })
+  })
+
   it('should update feature toggles dynamically', () => {
     // Start with all enabled
     bridge = new TrackingBridge(mockVrm, {
