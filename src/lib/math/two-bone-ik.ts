@@ -304,3 +304,113 @@ export function calculateArmLengths(
   const lowerArmLength = length(sub(wrist, elbow))
   return { upperArmLength, lowerArmLength }
 }
+
+/**
+ * Direct vector-to-euler arm solver (KalidoKit-style).
+ *
+ * Computes arm rotations directly from landmark positions without IK.
+ * Uses actual shoulder→elbow and elbow→wrist directions.
+ *
+ * This is simpler and more predictable than IK because it directly uses
+ * the detected landmark positions rather than solving for a target.
+ */
+export interface DirectArmInput {
+  /** Shoulder position */
+  shoulder: Vector3
+  /** Elbow position */
+  elbow: Vector3
+  /** Wrist position */
+  wrist: Vector3
+  /** Whether this is the left arm */
+  isLeft: boolean
+}
+
+/**
+ * Convert a direction vector to ZYX Euler angles.
+ * Computes the rotation that transforms 'from' direction to 'to' direction.
+ */
+function directionToEulerZYX(from: Vector3, to: Vector3): { x: number; y: number; z: number } {
+  const fromNorm = normalize(from)
+  const toNorm = normalize(to)
+
+  // Handle zero-length vectors
+  if (length(fromNorm) < 0.001 || length(toNorm) < 0.001) {
+    return { x: 0, y: 0, z: 0 }
+  }
+
+  // Compute rotation quaternion
+  const d = dot(fromNorm, toNorm)
+  const c = cross(fromNorm, toNorm)
+  const crossLen = length(c)
+
+  if (crossLen < 0.001) {
+    // Parallel vectors - no rotation or 180° rotation
+    return d > 0 ? { x: 0, y: 0, z: 0 } : { x: 0, y: Math.PI, z: 0 }
+  }
+
+  const axis = normalize(c)
+  const angle = Math.acos(clamp(d, -1, 1))
+
+  // Axis-angle to quaternion
+  const ha = angle / 2
+  const qx = axis.x * Math.sin(ha)
+  const qy = axis.y * Math.sin(ha)
+  const qz = axis.z * Math.sin(ha)
+  const qw = Math.cos(ha)
+
+  // Quaternion to ZYX Euler
+  const sinY = 2 * (qw * qy - qx * qz)
+  if (Math.abs(sinY) >= 0.9999999) {
+    // Gimbal lock
+    return {
+      x: 0,
+      y: (Math.PI / 2) * Math.sign(sinY),
+      z: Math.atan2(-(2 * (qx * qy - qw * qz)), 1 - 2 * (qx * qx + qz * qz)),
+    }
+  }
+
+  return {
+    x: Math.atan2(2 * (qw * qx + qy * qz), 1 - 2 * (qx * qx + qy * qy)),
+    y: Math.asin(sinY),
+    z: Math.atan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz)),
+  }
+}
+
+/**
+ * Solve arm rotations directly from landmarks (KalidoKit-style).
+ *
+ * Unlike the IK solver which targets a wrist position, this directly uses
+ * the detected landmark positions to compute rotations.
+ */
+export function solveArmDirect(input: DirectArmInput): TwoBoneIKResult {
+  const { shoulder, elbow, wrist, isLeft } = input
+
+  // T-pose direction
+  const tposeDir: Vector3 = isLeft ? { x: -1, y: 0, z: 0 } : { x: 1, y: 0, z: 0 }
+
+  // Upper arm direction: shoulder → elbow
+  const upperArmDir = sub(elbow, shoulder)
+
+  // Compute shoulder rotation: T-pose → upper arm direction
+  const shoulderRot = directionToEulerZYX(tposeDir, upperArmDir)
+
+  // Lower arm direction: elbow → wrist
+  const lowerArmDir = sub(wrist, elbow)
+
+  // Elbow bend: angle between upper and lower arm directions
+  const upperLen = length(upperArmDir)
+  const lowerLen = length(lowerArmDir)
+
+  let elbowBend = 0
+  if (upperLen > 0.001 && lowerLen > 0.001) {
+    const dotProduct = dot(upperArmDir, lowerArmDir) / (upperLen * lowerLen)
+    const angleBetween = Math.acos(clamp(dotProduct, -1, 1))
+    elbowBend = angleBetween // 0 when straight, increases as arm bends
+  }
+
+  return {
+    shoulder: shoulderRot,
+    elbow: { x: -elbowBend, y: 0, z: 0 }, // Negative X for flexion
+    reachable: true, // Always "reachable" since we use actual positions
+  }
+}

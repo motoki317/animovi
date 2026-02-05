@@ -176,26 +176,27 @@ describe('Pose Solver IK Integration Tests', () => {
   })
 
   describe('Arms Forward', () => {
-    it('should produce positive X rotation for forward arms', () => {
+    it('should produce Y rotation for forward arms', () => {
       const result = solvePose(ARMS_FORWARD.landmarks)!
 
-      // Forward = shoulder pitched forward (positive X rotation)
-      expect(result.leftArm.shoulder.x).toBeGreaterThan(0.3)
-      expect(result.rightArm.shoulder.x).toBeGreaterThan(0.3)
+      // Forward = shoulder rotated around Y axis
+      // Left arm: positive Y rotation rotates from -X to +Z
+      // Right arm: negative Y rotation rotates from +X to +Z
+      expect(result.leftArm.shoulder.y).toBeGreaterThan(0.3)
+      expect(result.rightArm.shoulder.y).toBeLessThan(-0.3)
     })
 
-    it('should have different X vs Z rotation compared to arms down', () => {
+    it('should have different Y vs Z rotation compared to arms down', () => {
       const forwardResult = solvePose(ARMS_FORWARD.landmarks)!
       const downResult = solvePose(ARMS_DOWN.landmarks)!
 
-      // Forward and down should produce different rotation patterns
-      // Forward primarily affects X (pitch), down primarily affects Z (roll)
-      // We just verify they're different poses
-      const forwardTotalX = Math.abs(forwardResult.leftArm.shoulder.x) + Math.abs(forwardResult.rightArm.shoulder.x)
-      const downTotalX = Math.abs(downResult.leftArm.shoulder.x) + Math.abs(downResult.rightArm.shoulder.x)
+      // Forward primarily affects Y (yaw), down primarily affects Z (roll)
+      const forwardTotalY = Math.abs(forwardResult.leftArm.shoulder.y) + Math.abs(forwardResult.rightArm.shoulder.y)
+      const downTotalZ = Math.abs(downResult.leftArm.shoulder.z) + Math.abs(downResult.rightArm.shoulder.z)
 
-      // Forward should have more X rotation than down
-      expect(forwardTotalX).toBeGreaterThan(downTotalX)
+      // Both should have significant rotation in their primary axis
+      expect(forwardTotalY).toBeGreaterThan(0.5)
+      expect(downTotalZ).toBeGreaterThan(0.5)
     })
   })
 
@@ -308,8 +309,9 @@ describe('Coordinate Transformation', () => {
   })
 
   it('should flip Z axis (MediaPipe Z-negative-forward to VRM Z-positive-forward)', () => {
-    // Arms forward (negative Z in MediaPipe) should result in positive X rotation
+    // Arms forward (negative Z in MediaPipe) should result in Y rotation
+    // Left arm rotates from -X to +Z via positive Y rotation
     const result = solvePose(ARMS_FORWARD.landmarks)!
-    expect(result.leftArm.shoulder.x).toBeGreaterThan(0)
+    expect(result.leftArm.shoulder.y).toBeGreaterThan(0)
   })
 })

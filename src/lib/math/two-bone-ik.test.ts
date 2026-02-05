@@ -249,3 +249,169 @@ describe('Two-Bone IK Solver', () => {
     })
   })
 })
+
+describe('Direct Vector-to-Euler Approach (KalidoKit-style)', () => {
+  /**
+   * Compute rotation from T-pose to a target direction using ZYX Euler angles.
+   * This is the KalidoKit-style direct approach - no IK involved.
+   */
+  function directionToEulerZYX(
+    from: Vector3,
+    to: Vector3
+  ): { x: number; y: number; z: number } {
+    // Normalize vectors
+    const fromLen = Math.sqrt(from.x ** 2 + from.y ** 2 + from.z ** 2)
+    const toLen = Math.sqrt(to.x ** 2 + to.y ** 2 + to.z ** 2)
+    if (fromLen < 0.001 || toLen < 0.001) {
+      return { x: 0, y: 0, z: 0 }
+    }
+    const fromNorm = { x: from.x / fromLen, y: from.y / fromLen, z: from.z / fromLen }
+    const toNorm = { x: to.x / toLen, y: to.y / toLen, z: to.z / toLen }
+
+    // Compute rotation quaternion from fromNorm to toNorm
+    const d = fromNorm.x * toNorm.x + fromNorm.y * toNorm.y + fromNorm.z * toNorm.z
+    const c = {
+      x: fromNorm.y * toNorm.z - fromNorm.z * toNorm.y,
+      y: fromNorm.z * toNorm.x - fromNorm.x * toNorm.z,
+      z: fromNorm.x * toNorm.y - fromNorm.y * toNorm.x,
+    }
+    const crossLen = Math.sqrt(c.x ** 2 + c.y ** 2 + c.z ** 2)
+
+    if (crossLen < 0.001) {
+      // Parallel vectors
+      return d > 0 ? { x: 0, y: 0, z: 0 } : { x: 0, y: Math.PI, z: 0 }
+    }
+
+    const axis = { x: c.x / crossLen, y: c.y / crossLen, z: c.z / crossLen }
+    const angle = Math.acos(Math.max(-1, Math.min(1, d)))
+
+    // Axis-angle to quaternion
+    const ha = angle / 2
+    const qx = axis.x * Math.sin(ha)
+    const qy = axis.y * Math.sin(ha)
+    const qz = axis.z * Math.sin(ha)
+    const qw = Math.cos(ha)
+
+    // Quaternion to ZYX Euler
+    const sinY = 2 * (qw * qy - qx * qz)
+    if (Math.abs(sinY) >= 0.9999999) {
+      return {
+        x: 0,
+        y: (Math.PI / 2) * Math.sign(sinY),
+        z: Math.atan2(-(2 * (qx * qy - qw * qz)), 1 - 2 * (qx * qx + qz * qz)),
+      }
+    }
+
+    return {
+      x: Math.atan2(2 * (qw * qx + qy * qz), 1 - 2 * (qx * qx + qy * qy)),
+      y: Math.asin(sinY),
+      z: Math.atan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz)),
+    }
+  }
+
+  /**
+   * Compute arm rotations directly from landmarks (KalidoKit-style).
+   * Uses actual shoulder→elbow and elbow→wrist directions instead of IK.
+   */
+  function solveArmDirect(
+    shoulder: Vector3,
+    elbow: Vector3,
+    wrist: Vector3,
+    isLeft: boolean
+  ): { shoulder: { x: number; y: number; z: number }; elbow: { x: number; y: number; z: number } } {
+    const tposeDir = isLeft ? { x: -1, y: 0, z: 0 } : { x: 1, y: 0, z: 0 }
+
+    // Upper arm direction: shoulder → elbow
+    const upperArmDir = {
+      x: elbow.x - shoulder.x,
+      y: elbow.y - shoulder.y,
+      z: elbow.z - shoulder.z,
+    }
+
+    // Compute shoulder rotation: T-pose → upper arm direction
+    const shoulderRot = directionToEulerZYX(tposeDir, upperArmDir)
+
+    // Lower arm direction: elbow → wrist
+    const lowerArmDir = {
+      x: wrist.x - elbow.x,
+      y: wrist.y - elbow.y,
+      z: wrist.z - elbow.z,
+    }
+
+    // Elbow bend: angle between upper and lower arm
+    const upperLen = Math.sqrt(upperArmDir.x ** 2 + upperArmDir.y ** 2 + upperArmDir.z ** 2)
+    const lowerLen = Math.sqrt(lowerArmDir.x ** 2 + lowerArmDir.y ** 2 + lowerArmDir.z ** 2)
+    if (upperLen < 0.001 || lowerLen < 0.001) {
+      return { shoulder: shoulderRot, elbow: { x: 0, y: 0, z: 0 } }
+    }
+
+    // Dot product gives cos(angle between vectors)
+    // When vectors point in same direction, dot = 1, angle = 0 (arm is straight)
+    // When vectors are perpendicular, dot = 0, angle = π/2 (90° bend)
+    const dotProduct =
+      (upperArmDir.x * lowerArmDir.x + upperArmDir.y * lowerArmDir.y + upperArmDir.z * lowerArmDir.z) /
+      (upperLen * lowerLen)
+    const angleBetween = Math.acos(Math.max(-1, Math.min(1, dotProduct)))
+
+    // Elbow flexion: 0 when straight (angle = 0), increases as arm bends
+    const elbowBend = angleBetween
+
+    return {
+      shoulder: shoulderRot,
+      elbow: { x: -elbowBend, y: 0, z: 0 },
+    }
+  }
+
+  it('should compute correct shoulder rotation for arm pointing forward', () => {
+    // Left arm pointing forward (negative Z)
+    const shoulder = { x: 0, y: 0, z: 0 }
+    const elbow = { x: 0, y: 0, z: -1 }
+    const wrist = { x: 0, y: 0, z: -2 }
+
+    const result = solveArmDirect(shoulder, elbow, wrist, true)
+
+    // T-pose for left arm is (-1, 0, 0), target is (0, 0, -1)
+    // This requires -90° rotation around Y axis
+    expect(result.shoulder.y).toBeCloseTo(-Math.PI / 2, 1)
+    expect(result.elbow.x).toBeCloseTo(0, 1) // Arm is straight
+  })
+
+  it('should compute correct shoulder rotation for arm pointing down', () => {
+    // Left arm pointing down (negative Y)
+    const shoulder = { x: 0, y: 0, z: 0 }
+    const elbow = { x: 0, y: -1, z: 0 }
+    const wrist = { x: 0, y: -2, z: 0 }
+
+    const result = solveArmDirect(shoulder, elbow, wrist, true)
+
+    // T-pose for left arm is (-1, 0, 0), target is (0, -1, 0)
+    // This requires +90° rotation around Z axis
+    expect(result.shoulder.z).toBeCloseTo(Math.PI / 2, 1)
+    expect(result.elbow.x).toBeCloseTo(0, 1) // Arm is straight
+  })
+
+  it('should compute elbow bend for bent arm', () => {
+    // Left arm with 90° elbow bend
+    const shoulder = { x: 0, y: 0, z: 0 }
+    const elbow = { x: 0, y: -1, z: 0 } // Upper arm points down
+    const wrist = { x: 0, y: -1, z: -1 } // Lower arm points forward
+
+    const result = solveArmDirect(shoulder, elbow, wrist, true)
+
+    // 90° bend = π/2 flexion
+    expect(result.elbow.x).toBeCloseTo(-Math.PI / 2, 1)
+  })
+
+  it('should handle right arm mirroring correctly', () => {
+    // Right arm pointing forward
+    const shoulder = { x: 0, y: 0, z: 0 }
+    const elbow = { x: 0, y: 0, z: -1 }
+    const wrist = { x: 0, y: 0, z: -2 }
+
+    const result = solveArmDirect(shoulder, elbow, wrist, false)
+
+    // T-pose for right arm is (+1, 0, 0), target is (0, 0, -1)
+    // This requires +90° rotation around Y axis (opposite of left arm)
+    expect(result.shoulder.y).toBeCloseTo(Math.PI / 2, 1)
+  })
+})
