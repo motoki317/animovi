@@ -100,7 +100,7 @@ function HomePageContent() {
   }, [setCameraY, setCameraZ])
 
   return (
-    <main style={{ display: 'flex', height: '100vh', position: 'relative' }}>
+    <main style={{ height: '100vh', width: '100vw', position: 'relative', overflow: 'hidden' }}>
       {/* Hidden video element for tracking */}
       <video
         ref={videoRef}
@@ -116,29 +116,35 @@ function HomePageContent() {
         }}
       />
 
-      {/* Avatar scene - full width when panel hidden */}
-      <div style={{ flex: 1 }}>
+      {/* Avatar scene - always full window size, character centered */}
+      <div style={{ position: 'absolute', inset: 0 }}>
         <AvatarScene
-            vrm={vrm}
-            backgroundType={settings.backgroundType}
-            backgroundColor={settings.backgroundColor}
-            cameraY={settings.cameraY}
-            cameraZ={settings.cameraZ}
-            autoFrameOnLoad={settings.cameraAutoFrame}
-            onAutoFrame={handleAutoFrame}
-          />
-        </div>
+          vrm={vrm}
+          backgroundType={settings.backgroundType}
+          backgroundColor={settings.backgroundColor}
+          cameraY={settings.cameraY}
+          cameraZ={settings.cameraZ}
+          autoFrameOnLoad={settings.cameraAutoFrame}
+          onAutoFrame={handleAutoFrame}
+        />
+      </div>
 
-        {/* Settings panel - collapsible */}
-        {settings.panelVisible && (
-          <aside
-            style={{
-              width: '300px',
-              borderLeft: '1px solid #333',
-              overflowY: 'auto',
-              transition: 'transform 0.3s ease-in-out',
-            }}
-          >
+      {/* Settings panel - overlay on right side */}
+      {settings.panelVisible && (
+        <aside
+          style={{
+            position: 'absolute',
+            right: 0,
+            top: 0,
+            bottom: 0,
+            width: '300px',
+            background: '#1a1a1a',
+            borderLeft: '1px solid #333',
+            overflowY: 'auto',
+            transition: 'transform 0.3s ease-in-out',
+            zIndex: 10,
+          }}
+        >
             <SettingsPanel
               smoothing={settings.smoothing}
               onSmoothingChange={settings.setSmoothing}
@@ -235,6 +241,7 @@ function HomePageContent() {
             height: '100%',
             cursor: 'pointer',
             background: 'linear-gradient(to right, transparent, rgba(255,255,255,0.1))',
+            zIndex: 10,
           }}
           title="Show settings panel"
         />
@@ -255,6 +262,7 @@ function HomePageContent() {
             color: 'white',
             borderRadius: 4,
             fontSize: '0.875rem',
+            zIndex: 5,
           }}
         >
           {isInitializing && 'Initializing tracking...'}
