@@ -131,5 +131,121 @@ describe('Two-Bone IK Solver', () => {
       // Left and right should have opposite Z rotation signs
       expect(Math.sign(leftResult.shoulder.z)).toBe(-Math.sign(rightResult.shoulder.z))
     })
+
+    describe('ZYX Euler order verification', () => {
+      /**
+       * Apply ZYX Euler rotation to a vector.
+       * ZYX intrinsic order: when applied to a vector, the operations happen as X first, then Y, then Z.
+       * This matches Three.js behavior for euler.order = 'ZYX'.
+       */
+      function applyEulerZYX(v: Vector3, x: number, y: number, z: number): Vector3 {
+        const cosX = Math.cos(x), sinX = Math.sin(x)
+        const cosY = Math.cos(y), sinY = Math.sin(y)
+        const cosZ = Math.cos(z), sinZ = Math.sin(z)
+
+        // Apply X rotation first
+        let x1 = v.x
+        let y1 = v.y * cosX - v.z * sinX
+        let z1 = v.y * sinX + v.z * cosX
+
+        // Then Y rotation
+        let x2 = x1 * cosY + z1 * sinY
+        let y2 = y1
+        let z2 = -x1 * sinY + z1 * cosY
+
+        // Finally Z rotation
+        let x3 = x2 * cosZ - y2 * sinZ
+        let y3 = x2 * sinZ + y2 * cosZ
+        let z3 = z2
+
+        return { x: x3, y: y3, z: z3 }
+      }
+
+      function normalize(v: Vector3): Vector3 {
+        const len = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z)
+        if (len === 0) return { x: 0, y: 0, z: 0 }
+        return { x: v.x / len, y: v.y / len, z: v.z / len }
+      }
+
+      function dot(a: Vector3, b: Vector3): number {
+        return a.x * b.x + a.y * b.y + a.z * b.z
+      }
+
+      it('should produce rotations that work correctly with ZYX order for forward target', () => {
+        const result = solveTwoBoneIK({
+          shoulder: { x: 0, y: 0, z: 0 },
+          target: { x: 0, y: 0, z: -1.5 }, // Forward (negative Z in VRM)
+          upperArmLength: 1.0,
+          lowerArmLength: 1.0,
+          poleHint: { x: 0, y: -0.5, z: -0.5 },
+          isLeft: true,
+        })
+
+        // T-pose direction for left arm
+        const tposeDir: Vector3 = { x: -1, y: 0, z: 0 }
+
+        // Apply shoulder rotation using ZYX order
+        const rotatedDir = applyEulerZYX(
+          tposeDir,
+          result.shoulder.x,
+          result.shoulder.y,
+          result.shoulder.z
+        )
+
+        // The rotated direction should point roughly forward (negative Z)
+        // Allowing for some deviation due to elbow bend offset
+        expect(rotatedDir.z).toBeLessThan(-0.5) // Should have significant forward component
+      })
+
+      it('should produce rotations that work correctly with ZYX order for downward target', () => {
+        const result = solveTwoBoneIK({
+          shoulder: { x: 0, y: 0, z: 0 },
+          target: { x: 0, y: -1.5, z: 0 }, // Down (negative Y in VRM)
+          upperArmLength: 1.0,
+          lowerArmLength: 1.0,
+          poleHint: { x: 0, y: -0.5, z: -0.5 },
+          isLeft: true,
+        })
+
+        // T-pose direction for left arm
+        const tposeDir: Vector3 = { x: -1, y: 0, z: 0 }
+
+        // Apply shoulder rotation using ZYX order
+        const rotatedDir = applyEulerZYX(
+          tposeDir,
+          result.shoulder.x,
+          result.shoulder.y,
+          result.shoulder.z
+        )
+
+        // The rotated direction should point roughly downward (negative Y)
+        expect(rotatedDir.y).toBeLessThan(-0.5) // Should have significant downward component
+      })
+
+      it('should produce rotations that work correctly with ZYX order for upward target', () => {
+        const result = solveTwoBoneIK({
+          shoulder: { x: 0, y: 0, z: 0 },
+          target: { x: 0, y: 1.5, z: 0 }, // Up (positive Y in VRM)
+          upperArmLength: 1.0,
+          lowerArmLength: 1.0,
+          poleHint: { x: 0, y: 0.5, z: -0.5 },
+          isLeft: true,
+        })
+
+        // T-pose direction for left arm
+        const tposeDir: Vector3 = { x: -1, y: 0, z: 0 }
+
+        // Apply shoulder rotation using ZYX order
+        const rotatedDir = applyEulerZYX(
+          tposeDir,
+          result.shoulder.x,
+          result.shoulder.y,
+          result.shoulder.z
+        )
+
+        // The rotated direction should point roughly upward (positive Y)
+        expect(rotatedDir.y).toBeGreaterThan(0.5) // Should have significant upward component
+      })
+    })
   })
 })

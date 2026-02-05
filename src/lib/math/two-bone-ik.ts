@@ -246,27 +246,30 @@ export function solveTwoBoneIK(input: TwoBoneIKInput): TwoBoneIKResult {
     const qz = axis.z * sinHalf
     const qw = cosHalf
 
-    // Quaternion to Euler angles (XYZ order, which Three.js uses by default)
-    // Reference: https://www.euclideanspace.com/maths/geometry/rotations/conversions/quaternionToEuler/
+    // Quaternion to Euler angles (ZYX order, which VRM uses)
+    // ZYX intrinsic = rotation applied in order: Z first, then Y, then X
+    // Reference: Three.js Euler.js setFromQuaternion with order 'ZYX'
 
-    // Roll (X-axis rotation)
-    const sinr_cosp = 2 * (qw * qx + qy * qz)
-    const cosr_cosp = 1 - 2 * (qx * qx + qy * qy)
-    shoulderX = Math.atan2(sinr_cosp, cosr_cosp)
-
-    // Pitch (Y-axis rotation)
-    const sinp = 2 * (qw * qy - qz * qx)
-    if (Math.abs(sinp) >= 1) {
-      // Gimbal lock - use 90 degrees
-      shoulderY = (Math.PI / 2) * Math.sign(sinp)
+    // Y rotation (middle axis, can gimbal lock)
+    const sinY = 2 * (qw * qy - qx * qz)
+    if (Math.abs(sinY) >= 0.9999999) {
+      // Gimbal lock
+      shoulderY = (Math.PI / 2) * Math.sign(sinY)
+      shoulderX = 0
+      shoulderZ = Math.atan2(-(2 * (qx * qy - qw * qz)), 1 - 2 * (qx * qx + qz * qz))
     } else {
-      shoulderY = Math.asin(sinp)
-    }
+      shoulderY = Math.asin(sinY)
 
-    // Yaw (Z-axis rotation)
-    const siny_cosp = 2 * (qw * qz + qx * qy)
-    const cosy_cosp = 1 - 2 * (qy * qy + qz * qz)
-    shoulderZ = Math.atan2(siny_cosp, cosy_cosp)
+      // X rotation (applied last in ZYX)
+      const sinX = 2 * (qw * qx + qy * qz)
+      const cosX = 1 - 2 * (qx * qx + qy * qy)
+      shoulderX = Math.atan2(sinX, cosX)
+
+      // Z rotation (applied first in ZYX)
+      const sinZ = 2 * (qw * qz + qx * qy)
+      const cosZ = 1 - 2 * (qy * qy + qz * qz)
+      shoulderZ = Math.atan2(sinZ, cosZ)
+    }
   }
 
   // Apply arm-side-specific adjustments if needed
