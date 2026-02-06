@@ -63,8 +63,9 @@ export function solveFace(landmarks: FaceLandmarks): FaceResult | null {
   const yaw = (CENTER_X - nose.x) * 2
 
   // Calculate pitch from forehead-chin z difference
-  // Forehead forward (larger z) relative to chin = head tilting down = negative pitch
-  const pitch = (chin.z - forehead.z) * 5
+  // Forehead forward (larger z) relative to chin = head tilting down = positive pitch
+  // VRM bone convention: positive X rotation = head tilts forward (looking down)
+  const pitch = (forehead.z - chin.z) * 5
 
   // Calculate roll from eye corner y-positions
   // Left eye higher than right = head tilting right = positive roll

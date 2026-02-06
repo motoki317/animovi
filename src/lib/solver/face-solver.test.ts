@@ -47,15 +47,30 @@ describe('FaceSolver', () => {
     expect(result!.head.yaw).toBeGreaterThan(0.1)
   })
 
-  it('should detect negative pitch when face tilts down', () => {
+  it('should detect positive pitch when face tilts down (VRM: +X = forward/down)', () => {
     const landmarks = createNeutralFaceLandmarks()
     // Move forehead closer (forward) and chin back (head tilting down)
+    // In MediaPipe face mesh: forward = more positive Z
     landmarks[10] = { x: 0.5, y: 0.3, z: 0.03 } // forehead forward
     landmarks[152] = { x: 0.5, y: 0.7, z: -0.02 } // chin back
 
     const result = solveFace(landmarks)
 
     expect(result).not.toBeNull()
+    // VRM bone convention: positive X rotation = head tilts forward = looking down
+    expect(result!.head.pitch).toBeGreaterThan(0.1)
+  })
+
+  it('should detect negative pitch when face tilts up (VRM: -X = backward/up)', () => {
+    const landmarks = createNeutralFaceLandmarks()
+    // Move chin forward and forehead back (head tilting up / looking up)
+    landmarks[10] = { x: 0.5, y: 0.3, z: -0.02 } // forehead back
+    landmarks[152] = { x: 0.5, y: 0.7, z: 0.03 } // chin forward
+
+    const result = solveFace(landmarks)
+
+    expect(result).not.toBeNull()
+    // VRM bone convention: negative X rotation = head tilts backward = looking up
     expect(result!.head.pitch).toBeLessThan(-0.1)
   })
 
