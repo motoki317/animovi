@@ -164,6 +164,42 @@ describe('TrackingBridge', () => {
     expect(mockVrm.humanoid.getNormalizedBoneNode).toHaveBeenCalled()
   })
 
+  it('should apply finger spread as Z rotation on proximal bones', () => {
+    const mockBones: Record<string, { rotation: { set: ReturnType<typeof vi.fn>; x: number; y: number; z: number } }> = {}
+    const fingerNames = ['Thumb', 'Index', 'Middle', 'Ring', 'Pinky']
+    for (const name of fingerNames) {
+      mockBones[`left${name}Proximal`] = {
+        rotation: { set: vi.fn(), x: 0, y: 0, z: 0 },
+      }
+    }
+    mockVrm.humanoid.getNormalizedBoneNode = vi.fn().mockImplementation((name: string) => {
+      return mockBones[name] ?? { rotation: { set: vi.fn(), x: 0, y: 0, z: 0 } }
+    })
+
+    const trackingResult: HolisticResult = {
+      face: null,
+      pose: null,
+      leftHand: {
+        thumb: { curl: 0, spread: 0.5 },
+        index: { curl: 0, spread: -0.4 },
+        middle: { curl: 0, spread: 0 },
+        ring: { curl: 0, spread: 0.3 },
+        pinky: { curl: 0, spread: 0.6 },
+      },
+      rightHand: null,
+    }
+
+    bridge.update(trackingResult)
+
+    // Index finger should have non-zero Z rotation from spread
+    const indexBone = mockBones['leftIndexProximal']
+    expect(indexBone.rotation.z).not.toBe(0)
+
+    // Ring finger should have non-zero Z rotation from spread
+    const ringBone = mockBones['leftRingProximal']
+    expect(ringBone.rotation.z).not.toBe(0)
+  })
+
   describe('Euler order (VRM compatibility)', () => {
     it('should use ZYX Euler order for head rotation', () => {
       const mockRotationSet = vi.fn()

@@ -203,13 +203,16 @@ export class TrackingBridge {
       const fingerData = hand[finger]
       if (!fingerData) continue
 
-      // Apply curl to proximal bone (simplified - real impl would do all phalanges)
+      // Apply curl and spread to proximal bone
       const boneName = `${prefix}${finger.charAt(0).toUpperCase()}${finger.slice(1)}Proximal`
       const bone = this.vrm.humanoid.getNormalizedBoneNode(boneName as never)
       if (bone) {
         const curl = this.smoothValue(`${boneName}Curl`, fingerData.curl)
-        // Curl is applied as X rotation (bending finger)
-        bone.rotation.x = curl * Math.PI * 0.5 // Max 90 degrees
+        const spread = this.smoothValue(`${boneName}Spread`, fingerData.spread)
+        // Curl is applied as X rotation (bending finger), max 90 degrees
+        bone.rotation.x = curl * Math.PI * 0.5
+        // Spread is applied as Z rotation (lateral splay), max ~30 degrees
+        bone.rotation.z = spread * Math.PI / 6
       }
     }
   }
