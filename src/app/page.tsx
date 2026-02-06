@@ -4,12 +4,13 @@
  * HomePage - Main application page integrating all components.
  */
 
-import { useEffect, useCallback, useRef } from 'react'
+import { useEffect, useCallback, useRef, useState } from 'react'
 import { CameraProvider, useCamera } from '../components/camera-provider'
 import { AvatarScene } from '../components/avatar-scene'
 import { SettingsPanel } from '../components/settings-panel'
 import { BackgroundSettings, type BackgroundConfig } from '../components/background-settings'
 import { TrackingDebugOverlay } from '../components/tracking-debug-overlay'
+import { PerformanceOverlay, type RendererInfo } from '../components/performance-overlay'
 import { useVRMLoader } from '../hooks/use-vrm-loader'
 import { useVRMTracking } from '../hooks/use-vrm-tracking'
 import { useSettingsStore } from '../stores/settings-store'
@@ -21,6 +22,8 @@ function HomePageContent() {
   const { stream } = useCamera()
   const debugEnabled = useTrackingStore((s) => s.debugEnabled)
   const setDebugEnabled = useTrackingStore((s) => s.setDebugEnabled)
+  const [perfVisible, setPerfVisible] = useState(false)
+  const [rendererInfo, setRendererInfo] = useState<RendererInfo | null>(null)
 
   // Video element for tracking
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -64,6 +67,11 @@ function HomePageContent() {
       // D key to toggle debug overlay
       if (e.key === 'd' || e.key === 'D') {
         setDebugEnabled(!debugEnabled)
+      }
+
+      // P key to toggle performance overlay
+      if (e.key === 'p' || e.key === 'P') {
+        setPerfVisible((prev) => !prev)
       }
     }
 
@@ -128,6 +136,7 @@ function HomePageContent() {
           autoFrameOnLoad={settings.cameraAutoFrame}
           onAutoFrame={handleAutoFrame}
           drawingFps={settings.drawingFps}
+          onRendererInfo={setRendererInfo}
         />
       </div>
 
@@ -252,6 +261,9 @@ function HomePageContent() {
           title="Show settings panel"
         />
       )}
+
+      {/* Performance overlay - toggle with 'P' key */}
+      <PerformanceOverlay visible={perfVisible} rendererInfo={rendererInfo} />
 
       {/* Debug overlay - toggle with 'D' key */}
       <TrackingDebugOverlay />

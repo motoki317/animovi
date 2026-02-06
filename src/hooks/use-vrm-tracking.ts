@@ -10,6 +10,7 @@ import { TrackingBridge } from '../lib/vrm/tracking-bridge'
 import { solveHolistic, type HolisticResult } from '../lib/solver/holistic-solver'
 import { isVideoReady, waitForVideoReady } from '../lib/capture/video-readiness'
 import { useTrackingStore, type PipelineState } from '../stores/tracking-store'
+import { trackingProfiler } from '../lib/perf/profiler-instances'
 
 export interface UseVRMTrackingOptions {
   /** The VRM model to animate */
@@ -257,7 +258,8 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
         rafIdRef.current = requestAnimationFrame(loop)
         return
       }
-      lastFrameTimeRef.current = timestamp
+      // Carry forward remainder to prevent drift and frame skipping
+      lastFrameTimeRef.current = timestamp - (elapsed % frameInterval)
 
       const video = videoRef.current
       const tracker = trackerRef.current
@@ -275,20 +277,28 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
       }
 
       try {
+        trackingProfiler.markFrame()
+
         // Detect landmarks using MediaPipe
+        trackingProfiler.begin('mediapipe')
         const mediaPipeResult = tracker.detectLandmarks(video, timestamp)
+        trackingProfiler.end('mediapipe')
 
         if (mediaPipeResult) {
           // Convert MediaPipe result to our format and solve
+          trackingProfiler.begin('solver')
           const result = solveHolistic({
             face: mediaPipeResult.faceLandmarks?.[0] ?? [],
             pose: mediaPipeResult.poseLandmarks?.[0] ?? [],
             leftHand: mediaPipeResult.leftHandLandmarks?.[0] ?? [],
             rightHand: mediaPipeResult.rightHandLandmarks?.[0] ?? [],
           })
+          trackingProfiler.end('solver')
 
           // Apply to VRM
+          trackingProfiler.begin('bridge')
           bridge.update(result)
+          trackingProfiler.end('bridge')
 
           // Emit debug data
           emitDebugData('tracking', mediaPipeResult, result, elapsed, timestamp, null)

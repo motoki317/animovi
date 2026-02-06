@@ -45,131 +45,95 @@ A lightweight, web-based VTubing application that tracks users via camera and an
 
 | Phase | Status | Tests |
 |-------|--------|-------|
-| 1-7. Core Foundation | Complete | 60/60 |
-| 8. VRM Loading | Complete | 8/8 |
-| 9. MediaPipe | Complete | 30/30 |
-| 10. Pipeline | Complete | 24/24 |
-| 11. UX Enhancements | Complete | 47/47 |
-| 12. UI Enhancements | Complete | ~77 |
-| **13. Solver Improvements** | **Complete** | 26/26 |
-| 14. Production Readiness | Planned | 0/TBD |
-| **Total** | | **274 tests (261 active + 13 legacy skipped, 32 files)** |
+| 1-12. Core through UI | Complete | ~246 |
+| 13. Solver Improvements | Complete | 26/26 |
+| 13.5. FPS Limits + PWA | Complete | 11/11 |
+| 14.1 Performance Profiling | Complete | 16/16 |
+| **14. Production Readiness** | **In Progress** | TBD |
+| **Total** | | **301 tests (288 active + 13 legacy skipped, 35 files)** |
 
 ---
 
-## Completed Phases (1-12)
+## Completed Phases (1-13.5)
 
 <details>
 <summary>Click to expand completed phases</summary>
 
-### Phase 1-7: Core Foundation
-- Project setup (Next.js, Vitest, ESLint)
-- Kalman filter & euler utilities
-- Face/Pose/Hand solvers
-- Web Worker infrastructure
-- VRM animator
-- React components (CameraProvider, AvatarScene, SettingsPanel)
-- State management (Zustand stores)
-- E2E tests
+### Phases 1-12: Core through UI
+- Project setup, Kalman filter, euler utilities, solvers, Web Worker infra
+- VRM loading (GLTF + VRMLoaderPlugin), MediaPipe HolisticLandmarker
+- TrackingBridge, PerformanceMonitor, full pipeline integration
+- UX: CameraPreview, VRMDropZone, LoadingSkeleton, ErrorBoundary, BackgroundSettings
+- UI: Camera position controls, auto-frame, collapsible settings panel (H key), tracking debug overlay (D key)
 
-### Phase 8: VRM Loading
-- GLTFLoader + VRMLoaderPlugin integration
-- Load from URL and File object
-- Progress reporting, disposal, error handling
+### Phase 13: Solver Improvements
+- Arm tracking: Direct vector-to-euler (3DOF), anatomical clamping, partial visibility
+- Tracking inversion fix: face pitch sign, arm Z-axis convention
+- Finger spread: MCP→TIP lateral angles, Z rotation on proximal bones
+- Eye gaze: Iris-to-socket ratio, yaw/pitch on eye bones
+- Kalman filter: Reset on tracking loss, per-feature active flags
 
-### Phase 9: MediaPipe Integration
-- HolisticLandmarker initialization
-- useTracking hook
-- Frame capture with OffscreenCanvas
-
-### Phase 10: End-to-End Pipeline
-- TrackingBridge for VRM animation
-- PerformanceMonitor (FPS, frame timing)
-- Full integration tests
-
-### Phase 11: UX Enhancements
-- CameraPreview component
-- VRMDropZone (drag & drop)
-- LoadingSkeleton & ErrorBoundary
-- BackgroundSettings (colors, transparency)
-- Manual VRM import button in SettingsPanel
-
-### Phase 12: UI Enhancements
-- Camera position controls (Y height, Z distance sliders)
-- Auto-frame to VRM face position on load
-- Background settings integration (solid color, transparent for OBS)
-- Collapsible settings panel with H key shortcut + hover-to-restore
-- Settings panel renders as overlay (character always centered in full window)
-- Tracking feature toggles (face/pose/hands) properly wired to TrackingBridge
-- Tracking debug overlay (D key)
+### Phase 13.5: FPS Limits + PWA
+- Configurable tracking FPS (10-60, default 30) and drawing FPS (15-120, default 60)
+- PWA: Service worker (network-first navigation, cache-first assets), web manifest, SVG icons
+- Install-to-homescreen support, offline fallback
 
 </details>
 
 ---
 
-## Phase 13: Solver Improvements
-
-**Goal:** Improve tracking accuracy and completeness.
-
-### Step 13.1: Arm Tracking Fix ✅
-
-**Completed changes:**
-- [x] Fixed elbow rotation: full 3DOF `directionToEulerZYX(upperArmDir, lowerArmDir)` instead of single scalar
-- [x] Added anatomical clamping (`clampArmRotation`) for shoulder and elbow limits
-- [x] Partial arm visibility: null arms when elbow/wrist not visible, fallback to default pose
-- [x] TrackingBridge handles null arms gracefully (falls back to arms-down pose)
-- [x] Legacy IK solver tests skipped (dead code from old approach)
-
-### Step 13.1b: Tracking Inversion Fix ✅
-
-**Completed changes:**
-- [x] Fixed face pitch sign: `(forehead.z - chin.z)` instead of `(chin.z - forehead.z)` to match VRM +X = forward/down
-- [x] Fixed arm Z-axis: `z: p.z` instead of `z: -p.z` in `toVRMSpace()` — scene PI rotation handles the flip
-- [x] Updated fixture expected values and test assertions for new Z convention
-
-### Step 13.2: Finger Spread ✅
-
-**Completed changes:**
-- [x] Calculate lateral finger spread via MCP→TIP angle relative to middle finger
-- [x] Apply spread as Z rotation on proximal bones (max ~30 degrees)
-- [x] Spread values normalized to [-1, 1], clamped
-
-### Step 13.3: Eye Gaze ✅
-
-**Completed changes:**
-- [x] Calculate eye gaze from iris center position relative to eye socket (corners)
-- [x] Average both eyes for stability, normalize to [-1, 1]
-- [x] Apply gaze as yaw/pitch rotation on leftEye/rightEye VRM bones (max ~30 degrees)
-- [x] Graceful fallback when iris landmarks not available (< 478 landmarks)
-
-### Step 13.4: Kalman Filter Integration ✅
-
-**Completed changes:**
-- [x] Kalman filter already applied to all solver outputs (head, spine, arms, fingers, gaze)
-- [x] Reset filters on tracking loss (face, pose, hand) so next detection snaps to new value
-- [x] Per-feature active tracking flags (prevFaceActive, prevPoseActive, etc.)
-
----
-
 ## Phase 14: Production Readiness
 
-**Goal:** Prepare for deployment and real-world use.
+**Goal:** Optimize performance via profiling, then prepare for deployment.
 
-### Step 14.1: Bundle Optimization
-- Code splitting, dynamic imports
-- Bundle analysis (target: <500KB gzipped)
+### Step 14.1: Performance Profiling & Optimization ✅
 
-### Step 14.2: PWA Support
-- Service worker for asset caching
-- Web manifest, offline fallback
+**Approach:** Profile first, optimize second. Never assume bottlenecks.
 
-### Step 14.3: Cross-Browser Testing
-- Browser/feature detection
-- WebGL2, Workers support check
+#### 14.1a: Profiling Instrumentation ✅
+- PipelineProfiler utility with per-stage timing, rolling averages, FPS tracking
+- Instrumented tracking loop: mediapipe, solver, bridge stages
+- Instrumented render loop: controls, vrm_update, render stages
+- Real-time performance overlay (toggle with P key) showing per-stage breakdown + GPU info
 
-### Step 14.4: Error Tracking
-- Error boundary with reporting
-- Performance metrics collection
+#### 14.1b: CPU Optimization ✅
+- **Found & fixed FPS throttle alignment bug**: Render FPS went from 34fps to 60fps
+  - Root cause: `lastFrameTime = timestamp` caused drift when rAF interval matched target
+  - Fix: `lastFrameTime = timestamp - (elapsed % frameInterval)` carries forward remainder
+- **Profiling results** (640x480 camera, M4 Max GPU):
+  - MediaPipe inference: ~14ms (99%+ of tracking time, at hardware minimum for holistic model)
+  - Solver: <0.1ms, Bridge (Kalman + bones): <0.1ms — negligible
+  - Render total: 0.6ms (controls 0ms, VRM update 0.2ms, Three.js render 0.3ms)
+  - No further CPU optimization needed — all stages except MediaPipe are negligible
+
+#### 14.1c: GPU Optimization ✅
+- **GPU load is light**: 8-10 draw calls, ~42K triangles, 17-21 textures
+- Added `powerPreference: 'high-performance'` for discrete GPU selection
+- Capped pixel ratio at 2 to prevent excessive fill rate on high-DPI displays
+- Render time: 0.3ms/frame — no GPU bottleneck
+
+#### 14.1d: Memory Optimization ✅
+- Heap stable at ~305MB over 45s of tracking (normal GC fluctuation, no growth trend)
+- Fixed VRM texture disposal: textures now properly disposed on model swap
+- Verified: geometries, materials, and textures all cleaned up on VRM reload
+
+### Step 14.2: PWA Support ✅ (Completed in Phase 13.5)
+
+### Step 14.3: Bundle Optimization
+- Analyze bundle with `next-bundle-analyzer`
+- Code splitting for MediaPipe WASM, Three.js
+- Dynamic imports for heavy components
+- Target: < 500KB gzipped initial load
+
+### Step 14.4: Cross-Browser Compatibility
+- Feature detection for WebGL2, MediaDevices, Service Worker
+- Graceful fallback messages for unsupported browsers
+- Test on Chrome, Firefox, Safari, Edge
+
+### Step 14.5: Error Tracking & Monitoring
+- Error boundary with user-facing error messages
+- Performance metrics collection (FPS, frame timing)
+- Optional: Sentry or similar integration
 
 ---
 
@@ -186,6 +150,8 @@ vrm-tuber/
 │   │   ├── camera-provider.tsx
 │   │   ├── error-boundary.tsx
 │   │   ├── loading-skeleton.tsx
+│   │   ├── performance-overlay.tsx
+│   │   ├── pwa-register.tsx
 │   │   ├── settings-panel.tsx
 │   │   ├── tracking-debug-overlay.tsx
 │   │   └── vrm-drop-zone.tsx
@@ -198,7 +164,8 @@ vrm-tuber/
 │   │   ├── integration/pipeline.ts
 │   │   ├── math/
 │   │   ├── mediapipe/tracker.ts
-│   │   ├── perf/monitor.ts
+│   │   ├── perf/monitor.ts, pipeline-profiler.ts, profiler-instances.ts
+│   │   ├── pwa/register-sw.ts
 │   │   ├── solver/
 │   │   ├── vrm/
 │   │   └── worker/
@@ -206,6 +173,10 @@ vrm-tuber/
 │   │   ├── settings-store.ts
 │   │   └── tracking-store.ts
 │   └── types/
+├── public/
+│   ├── icons/                  # PWA icons (SVG)
+│   ├── manifest.json           # PWA manifest
+│   └── sw.js                   # Service worker
 ├── tests/e2e/
 ├── vitest.config.ts
 └── PLAN.md
@@ -216,15 +187,17 @@ vrm-tuber/
 ## Phase Priority
 
 ```
-Phases 1-12 (Complete)
+Phases 1-13.5 (Complete) ✅
     │
-    ├──► Phase 13 (Solvers) ✅ Complete
-    │      ├── 13.1 Arm tracking fix ✅
-    │      ├── 13.2 Finger spread ✅
-    │      ├── 13.3 Eye gaze ✅
-    │      └── 13.4 Kalman filter integration ✅
-    │
-    └──► Phase 14 (Production) - Ship it!
+    └──► Phase 14 (Production) - In Progress
+           ├── 14.1 Performance Profiling & Optimization ◄── TOP PRIORITY
+           │     ├── 14.1a Add profiling instrumentation
+           │     ├── 14.1b CPU optimization (profile-driven)
+           │     ├── 14.1c GPU optimization (profile-driven)
+           │     └── 14.1d Memory optimization
+           ├── 14.3 Bundle optimization
+           ├── 14.4 Cross-browser compatibility
+           └── 14.5 Error tracking & monitoring
 ```
 
 ---

@@ -9,6 +9,8 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import type { VRM } from '@pixiv/three-vrm'
 import type { BackgroundType } from './background-settings'
+import { renderProfiler } from '../lib/perf/profiler-instances'
+import type { RendererInfo } from './performance-overlay'
 
 interface AvatarSceneProps {
   vrm?: VRM | null
@@ -20,6 +22,7 @@ interface AvatarSceneProps {
   onAutoFrame?: (y: number, z: number) => void
   enableOrbitControls?: boolean
   drawingFps?: number
+  onRendererInfo?: (info: RendererInfo) => void
 }
 
 export function AvatarScene({
@@ -32,6 +35,7 @@ export function AvatarScene({
   onAutoFrame,
   enableOrbitControls = true,
   drawingFps = 60,
+  onRendererInfo,
 }: AvatarSceneProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
@@ -54,6 +58,10 @@ export function AvatarScene({
   // Store drawing FPS in ref so render loop can access latest value
   const drawingFpsRef = useRef(drawingFps)
   drawingFpsRef.current = drawingFps
+
+  // Store renderer info callback in ref
+  const onRendererInfoRef = useRef(onRendererInfo)
+  onRendererInfoRef.current = onRendererInfo
 
   // Store initial values in refs for initialization
   const initialBackgroundTypeRef = useRef(backgroundType)
@@ -89,9 +97,11 @@ export function AvatarScene({
     const renderer = new THREE.WebGLRenderer({
       antialias: true,
       alpha: true, // Always enable alpha for flexibility
+      powerPreference: 'high-performance',
     })
     renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight)
-    renderer.setPixelRatio(window.devicePixelRatio)
+    // Cap pixel ratio at 2 to avoid excessive fill rate on high-DPI displays
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     if (initialBackgroundTypeRef.current === 'transparent') {
       renderer.setClearColor(0x000000, 0)
     }
@@ -125,26 +135,47 @@ export function AvatarScene({
     clockRef.current = clock
     let animationId: number
     let lastFrameTime = 0
+    let rendererInfoCounter = 0
     function animate(timestamp = 0) {
       animationId = requestAnimationFrame(animate)
 
       // Throttle to target drawing FPS
       const frameInterval = 1000 / drawingFpsRef.current
-      if (timestamp - lastFrameTime < frameInterval) {
+      const elapsed = timestamp - lastFrameTime
+      if (elapsed < frameInterval) {
         return
       }
-      lastFrameTime = timestamp
+      // Carry forward remainder to prevent drift and frame skipping
+      lastFrameTime = timestamp - (elapsed % frameInterval)
+
+      renderProfiler.markFrame()
 
       const deltaTime = clock.getDelta()
 
+      renderProfiler.begin('controls')
       controls?.update() // Required for damping
+      renderProfiler.end('controls')
 
       // Update VRM (required for expressions, spring bones, and constraints)
+      renderProfiler.begin('vrm_update')
       if (vrmRef.current) {
         vrmRef.current.update(deltaTime)
       }
+      renderProfiler.end('vrm_update')
 
+      renderProfiler.begin('render')
       renderer.render(scene, camera)
+      renderProfiler.end('render')
+
+      // Emit renderer info periodically (every ~60 frames)
+      if (++rendererInfoCounter >= 60) {
+        rendererInfoCounter = 0
+        onRendererInfoRef.current?.({
+          drawCalls: renderer.info.render.calls,
+          triangles: renderer.info.render.triangles,
+          textures: renderer.info.memory.textures,
+        })
+      }
     }
     animate()
 
