@@ -1,6 +1,6 @@
 {
-  "name": "VRM-Tuber",
-  "short_name": "VRM-Tuber",
+  "name": "Animovi",
+  "short_name": "Animovi",
   "description": "A lightweight, web-based VTubing application",
   "start_url": "/",
   "display": "standalone",

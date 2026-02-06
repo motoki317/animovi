@@ -1,4 +1,4 @@
-# VRM-Tuber Development Plan
+# Animovi Development Plan
 
 Internal reference for architecture decisions and implementation history.
 

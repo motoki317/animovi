@@ -1,5 +1,5 @@
 {
-  "name": "vrm-tuber",
+  "name": "animovi",
   "version": "1.0.0",
   "description": "A lightweight, web-based VTubing application that tracks users via camera and animates VRM avatars.",
   "type": "module",

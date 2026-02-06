@@ -106,7 +106,7 @@ export const useSettingsStore = create<SettingsState>()(
       togglePanel: () => set((state) => ({ panelVisible: !state.panelVisible })),
     }),
     {
-      name: 'vrm-tuber-settings',
+      name: 'animovi-settings',
     }
   )
 )

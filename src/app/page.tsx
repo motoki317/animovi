@@ -116,7 +116,7 @@ function HomePageContent() {
         <div style={{ textAlign: 'center', maxWidth: '500px', padding: '2rem' }}>
           <h1 style={{ fontSize: '1.5rem', marginBottom: '1rem' }}>Browser Not Supported</h1>
           <p style={{ color: '#aaa', marginBottom: '1rem' }}>
-            VRM-Tuber requires the following features that your browser does not support:
+            Animovi requires the following features that your browser does not support:
           </p>
           <ul style={{ textAlign: 'left', color: '#f87171', listStyle: 'none', padding: 0 }}>
             {browserSupport.missing.map((feature) => (

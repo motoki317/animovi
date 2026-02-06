@@ -5,13 +5,13 @@ import { GlobalErrorHandler } from '../components/global-error-handler'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'VRM-Tuber',
+  title: 'Animovi',
   description: 'A lightweight, web-based VTubing application',
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent',
-    title: 'VRM-Tuber',
+    title: 'Animovi',
   },
 }
 

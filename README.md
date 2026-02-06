@@ -1,4 +1,4 @@
-# VRM-Tuber
+# Animovi
 
 A lightweight, web-based VTubing application that tracks your face, pose, and hands via camera and animates VRM avatars in real time.
 

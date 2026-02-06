@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 
-test.describe('VRM-Tuber E2E', () => {
+test.describe('Animovi E2E', () => {
   test('should load app and display avatar scene', async ({ page }) => {
     await page.goto('/')
 

@@ -1,5 +1,5 @@
-// Service Worker for VRM-Tuber PWA
-const CACHE_NAME = 'vrm-tuber-v1'
+// Service Worker for Animovi PWA
+const CACHE_NAME = 'animovi-v1'
 
 // Assets to precache on install
 const PRECACHE_ASSETS = [
