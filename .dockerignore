@@ -1,0 +1,12 @@
+node_modules
+.next
+.git
+*.md
+LICENSE
+tests
+coverage
+.env*
+Dockerfile
+.dockerignore
+playwright.config.ts
+playwright-report
