@@ -71,6 +71,17 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
   const isRunningRef = useRef(false)
   const lastFrameTimeRef = useRef(0)
 
+  // Refs for latest settings values — avoids stale closures in async init()
+  // when Zustand persist hydrates after the initial render but before bridge creation
+  const smoothingRef = useRef(smoothing)
+  const faceTrackingRef = useRef(faceTracking)
+  const poseTrackingRef = useRef(poseTracking)
+  const handTrackingRef = useRef(handTracking)
+  smoothingRef.current = smoothing
+  faceTrackingRef.current = faceTracking
+  poseTrackingRef.current = poseTracking
+  handTrackingRef.current = handTracking
+
   // Helper to emit debug data - reads debugEnabled fresh from store to avoid stale closure
   const emitDebugData = useCallback((
     pipelineState: PipelineState,
@@ -158,11 +169,13 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
         emitDebugData('initializing', null, null, 0, Date.now(), 'MediaPipe ready, creating bridge...')
 
         // Create bridge (vrm is guaranteed non-null here due to guard at start of effect)
+        // Read from refs to get post-hydration values (Zustand persist may have
+        // updated the store between initial render and this point in async init)
         bridgeRef.current = new TrackingBridge(vrm!, {
-          smoothing,
-          faceTracking,
-          poseTracking,
-          handTracking,
+          smoothing: smoothingRef.current,
+          faceTracking: faceTrackingRef.current,
+          poseTracking: poseTrackingRef.current,
+          handTracking: handTrackingRef.current,
         })
 
         setIsInitializing(false)
