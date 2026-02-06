@@ -298,6 +298,34 @@ describe('AvatarScene', () => {
     expect(mockVRM.scene.rotation.y).toBe(Math.PI)
   })
 
+  it('should show context lost overlay when WebGL context is lost', () => {
+    render(<AvatarScene />)
+
+    // Context lost overlay should not be visible initially
+    expect(screen.queryByTestId('context-lost-overlay')).not.toBeInTheDocument()
+
+    // Simulate context loss on the canvas
+    const container = screen.getByTestId('avatar-scene')
+    const canvas = container.querySelector('canvas')
+    expect(canvas).toBeTruthy()
+
+    act(() => {
+      const event = new Event('webglcontextlost')
+      canvas!.dispatchEvent(event)
+    })
+
+    expect(screen.getByTestId('context-lost-overlay')).toBeInTheDocument()
+    expect(screen.getByText('WebGL context lost')).toBeInTheDocument()
+
+    // Simulate context restore
+    act(() => {
+      const event = new Event('webglcontextrestored')
+      canvas!.dispatchEvent(event)
+    })
+
+    expect(screen.queryByTestId('context-lost-overlay')).not.toBeInTheDocument()
+  })
+
   it('should handle callback updates without infinite loops', () => {
     const onAutoFrame1 = vi.fn()
     const onAutoFrame2 = vi.fn()

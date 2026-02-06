@@ -4,7 +4,7 @@
  * AvatarScene - Three.js canvas for VRM avatar rendering.
  */
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import type { VRM } from '@pixiv/three-vrm'
@@ -37,6 +37,7 @@ export function AvatarScene({
   drawingFps = 60,
   onRendererInfo,
 }: AvatarSceneProps) {
+  const [contextLost, setContextLost] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
   const sceneRef = useRef<THREE.Scene | null>(null)
@@ -107,6 +108,20 @@ export function AvatarScene({
     }
     containerRef.current.appendChild(renderer.domElement)
     rendererRef.current = renderer
+
+    // Handle WebGL context loss/restore
+    const canvas = renderer.domElement
+    const handleContextLost = (event: Event) => {
+      event.preventDefault()
+      setContextLost(true)
+      console.warn('[AvatarScene] WebGL context lost')
+    }
+    const handleContextRestored = () => {
+      setContextLost(false)
+      console.info('[AvatarScene] WebGL context restored')
+    }
+    canvas.addEventListener('webglcontextlost', handleContextLost)
+    canvas.addEventListener('webglcontextrestored', handleContextRestored)
 
     // Add lights
     const directionalLight = new THREE.DirectionalLight(0xffffff, 1)
@@ -193,6 +208,8 @@ export function AvatarScene({
     return () => {
       cancelAnimationFrame(animationId)
       window.removeEventListener('resize', handleResize)
+      canvas.removeEventListener('webglcontextlost', handleContextLost)
+      canvas.removeEventListener('webglcontextrestored', handleContextRestored)
       controls?.dispose()
       renderer.dispose()
       containerRef.current?.removeChild(renderer.domElement)
@@ -290,10 +307,33 @@ export function AvatarScene({
   }, [vrm, autoFrameOnLoad]) // Removed autoFrameToHead dependency - using refs instead
 
   return (
-    <div
-      ref={containerRef}
-      data-testid="avatar-scene"
-      style={{ width: '100%', height: '100%', minHeight: '400px' }}
-    />
+    <div style={{ position: 'relative', width: '100%', height: '100%', minHeight: '400px' }}>
+      <div
+        ref={containerRef}
+        data-testid="avatar-scene"
+        style={{ width: '100%', height: '100%' }}
+      />
+      {contextLost && (
+        <div
+          data-testid="context-lost-overlay"
+          style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'rgba(0, 0, 0, 0.8)',
+            color: '#fff',
+            fontFamily: 'sans-serif',
+            zIndex: 20,
+          }}
+        >
+          <div style={{ textAlign: 'center' }}>
+            <p style={{ fontSize: '1.25rem', marginBottom: '0.5rem' }}>WebGL context lost</p>
+            <p style={{ color: '#aaa', fontSize: '0.875rem' }}>Waiting for GPU to recover...</p>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
