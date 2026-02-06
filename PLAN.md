@@ -49,8 +49,11 @@ A lightweight, web-based VTubing application that tracks users via camera and an
 | 13. Solver Improvements | Complete | 26/26 |
 | 13.5. FPS Limits + PWA | Complete | 11/11 |
 | 14.1 Performance Profiling | Complete | 16/16 |
-| **14. Production Readiness** | **In Progress** | TBD |
-| **Total** | | **301 tests (288 active + 13 legacy skipped, 35 files)** |
+| 14.3 Bundle Optimization | Complete | - |
+| 14.4 Cross-Browser Compat | Complete | 4/4 |
+| 14.5 Error Tracking | Complete | 12/12 |
+| **14. Production Readiness** | **Complete** | |
+| **Total** | | **317 tests (304 active + 13 legacy skipped, 39 files)** |
 
 ---
 
@@ -119,21 +122,25 @@ A lightweight, web-based VTubing application that tracks users via camera and an
 
 ### Step 14.2: PWA Support ✅ (Completed in Phase 13.5)
 
-### Step 14.3: Bundle Optimization
-- Analyze bundle with `next-bundle-analyzer`
-- Code splitting for MediaPipe WASM, Three.js
-- Dynamic imports for heavy components
-- Target: < 500KB gzipped initial load
+### Step 14.3: Bundle Optimization ✅
+- **Total: 394KB gzipped** (under 500KB target)
+- Main chunk: 230KB (Three.js + VRM + MediaPipe + Zustand + app code)
+- React/Next.js framework: 146KB
+- Next.js/Turbopack handles code splitting automatically
+- MediaPipe WASM + model loaded lazily from CDN (not in JS bundle)
 
-### Step 14.4: Cross-Browser Compatibility
-- Feature detection for WebGL2, MediaDevices, Service Worker
-- Graceful fallback messages for unsupported browsers
-- Test on Chrome, Firefox, Safari, Edge
+### Step 14.4: Cross-Browser Compatibility ✅
+- `browser-support.ts`: Feature detection for WebGL2, MediaDevices, Service Worker
+- Graceful fallback UI for unsupported browsers (early return in page.tsx)
+- WebGL2 + Camera API required; Service Worker optional (PWA only)
+- 4 tests covering all feature detection scenarios
 
-### Step 14.5: Error Tracking & Monitoring
-- Error boundary with user-facing error messages
-- Performance metrics collection (FPS, frame timing)
-- Optional: Sentry or similar integration
+### Step 14.5: Error Tracking & Monitoring ✅
+- Next.js `error.tsx` (route-level) and `global-error.tsx` (root layout) error pages with recovery UI
+- Global unhandled error/rejection handler (`global-handler.ts`) installed via layout
+- WebGL context loss/restore handling in AvatarScene with user-facing overlay
+- Existing: ErrorBoundary class component, PerformanceMonitor, PipelineProfiler
+- 12 tests covering error pages, global handler, and context loss
 
 ---
 
@@ -187,17 +194,13 @@ vrm-tuber/
 ## Phase Priority
 
 ```
-Phases 1-13.5 (Complete) ✅
-    │
-    └──► Phase 14 (Production) - In Progress
-           ├── 14.1 Performance Profiling & Optimization ◄── TOP PRIORITY
-           │     ├── 14.1a Add profiling instrumentation
-           │     ├── 14.1b CPU optimization (profile-driven)
-           │     ├── 14.1c GPU optimization (profile-driven)
-           │     └── 14.1d Memory optimization
-           ├── 14.3 Bundle optimization
-           ├── 14.4 Cross-browser compatibility
-           └── 14.5 Error tracking & monitoring
+Phases 1-14 (Complete) ✅
+    ├── 1-13.5: Core through FPS Limits + PWA
+    └── 14: Production Readiness
+           ├── 14.1 Performance Profiling & Optimization ✅
+           ├── 14.3 Bundle Optimization ✅
+           ├── 14.4 Cross-Browser Compatibility ✅
+           └── 14.5 Error Tracking & Monitoring ✅
 ```
 
 ---
