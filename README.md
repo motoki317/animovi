@@ -2,6 +2,10 @@
 
 A lightweight, web-based VTubing application that tracks your face, pose, and hands via camera and animates VRM avatars in real time.
 
+⚠️ Agentic coding alert: This app was fully coded using Claude Code (Opus 4.6), and I human didn't read
+a single line of code the agent has written. Please feel free to report any inappropriate copyrighted
+code usage or other bugs / issues in general, if you find any.
+
 ## Features
 
 - **Face tracking** - Head rotation, eye gaze, and blendshape expressions
