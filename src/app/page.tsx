@@ -4,7 +4,7 @@
  * HomePage - Main application page integrating all components.
  */
 
-import { useEffect, useCallback, useRef, useState } from 'react'
+import { useEffect, useCallback, useRef, useState, useMemo } from 'react'
 import { CameraProvider, useCamera } from '../components/camera-provider'
 import { AvatarScene } from '../components/avatar-scene'
 import { SettingsPanel } from '../components/settings-panel'
@@ -15,8 +15,10 @@ import { useVRMLoader } from '../hooks/use-vrm-loader'
 import { useVRMTracking } from '../hooks/use-vrm-tracking'
 import { useSettingsStore } from '../stores/settings-store'
 import { useTrackingStore } from '../stores/tracking-store'
+import { checkBrowserSupport } from '../lib/compat/browser-support'
 
 function HomePageContent() {
+  const browserSupport = useMemo(() => checkBrowserSupport(), [])
   const { vrm, loading: vrmLoading, loadFromFile } = useVRMLoader()
   const settings = useSettingsStore()
   const { stream } = useCamera()
@@ -107,6 +109,29 @@ function HomePageContent() {
     setCameraY(y)
     setCameraZ(z)
   }, [setCameraY, setCameraZ])
+
+  if (!browserSupport.supported) {
+    return (
+      <main style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#1a1a2e', color: '#fff', fontFamily: 'sans-serif' }}>
+        <div style={{ textAlign: 'center', maxWidth: '500px', padding: '2rem' }}>
+          <h1 style={{ fontSize: '1.5rem', marginBottom: '1rem' }}>Browser Not Supported</h1>
+          <p style={{ color: '#aaa', marginBottom: '1rem' }}>
+            VRM-Tuber requires the following features that your browser does not support:
+          </p>
+          <ul style={{ textAlign: 'left', color: '#f87171', listStyle: 'none', padding: 0 }}>
+            {browserSupport.missing.map((feature) => (
+              <li key={feature} style={{ marginBottom: '0.5rem' }}>
+                {feature}
+              </li>
+            ))}
+          </ul>
+          <p style={{ color: '#888', marginTop: '1.5rem', fontSize: '0.875rem' }}>
+            Please use a recent version of Chrome, Edge, or Firefox.
+          </p>
+        </div>
+      </main>
+    )
+  }
 
   return (
     <main style={{ height: '100vh', width: '100vw', position: 'relative', overflow: 'hidden' }}>

@@ -16,6 +16,16 @@ vi.mock('../components/camera-provider', () => ({
   }),
 }))
 
+vi.mock('../lib/compat/browser-support', () => ({
+  checkBrowserSupport: () => ({
+    webgl2: true,
+    mediaDevices: true,
+    serviceWorker: true,
+    supported: true,
+    missing: [],
+  }),
+}))
+
 vi.mock('../components/avatar-scene', () => ({
   AvatarScene: ({ vrm }: { vrm: unknown }) => (
     <div data-testid="avatar-scene" data-has-vrm={vrm ? 'true' : 'false'} />
@@ -28,6 +38,23 @@ vi.mock('../components/settings-panel', () => ({
 
 vi.mock('../components/background-settings', () => ({
   BackgroundSettings: () => <div data-testid="background-settings" />,
+}))
+
+vi.mock('../components/tracking-debug-overlay', () => ({
+  TrackingDebugOverlay: () => <div data-testid="tracking-debug-overlay" />,
+}))
+
+vi.mock('../components/performance-overlay', () => ({
+  PerformanceOverlay: () => <div data-testid="performance-overlay" />,
+}))
+
+vi.mock('../hooks/use-vrm-tracking', () => ({
+  useVRMTracking: () => ({
+    isTracking: false,
+    isInitializing: false,
+    isWaitingForVideo: false,
+    error: null,
+  }),
 }))
 
 vi.mock('../hooks/use-vrm-loader', () => ({
@@ -65,6 +92,11 @@ vi.mock('../stores/settings-store', () => ({
     setCameraY: vi.fn(),
     setCameraZ: vi.fn(),
     setCameraAutoFrame: vi.fn(),
+    // FPS settings
+    trackingFps: 30,
+    drawingFps: 60,
+    setTrackingFps: vi.fn(),
+    setDrawingFps: vi.fn(),
     // Panel visibility
     panelVisible: true,
     setPanelVisible: vi.fn(),
