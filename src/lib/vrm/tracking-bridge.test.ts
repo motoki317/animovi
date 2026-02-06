@@ -237,6 +237,138 @@ describe('TrackingBridge', () => {
     )
   })
 
+  describe('Kalman filter reset on tracking loss', () => {
+    it('should reset face filters when face tracking is lost', () => {
+      bridge.setSmoothing(0.8) // High smoothing = slow interpolation
+
+      // Send face data for a few frames to build filter state
+      const faceResult: HolisticResult = {
+        face: {
+          head: { pitch: 0.5, yaw: 0.3, roll: 0.1 },
+          eyes: { leftBlink: 0, rightBlink: 0, gazeX: 0, gazeY: 0 },
+          mouth: { open: 0, smile: 0 },
+        },
+        pose: null, leftHand: null, rightHand: null,
+      }
+      bridge.update(faceResult)
+      bridge.update(faceResult)
+
+      // Lose face tracking for a frame
+      bridge.update({ face: null, pose: null, leftHand: null, rightHand: null })
+
+      // Now regain tracking with very different values
+      const mockRotationSet = vi.fn()
+      mockVrm.humanoid.getNormalizedBoneNode = vi.fn().mockReturnValue({
+        rotation: { set: mockRotationSet, x: 0, y: 0, z: 0 },
+      })
+
+      const newFaceResult: HolisticResult = {
+        face: {
+          head: { pitch: -0.5, yaw: -0.3, roll: -0.1 },
+          eyes: { leftBlink: 0, rightBlink: 0, gazeX: 0, gazeY: 0 },
+          mouth: { open: 0, smile: 0 },
+        },
+        pose: null, leftHand: null, rightHand: null,
+      }
+      bridge.update(newFaceResult)
+
+      // After filter reset, the first frame should snap close to the new value
+      // (not be dragged toward the stale old value due to high smoothing)
+      const headSetCall = mockRotationSet.mock.calls.find(
+        (call: unknown[]) => call[3] === 'ZYX'
+      )
+      expect(headSetCall).toBeDefined()
+      // Pitch should be close to -0.5 (snapped), not interpolated from 0.5
+      expect(headSetCall![0]).toBeCloseTo(-0.5, 1)
+    })
+
+    it('should reset pose filters when pose tracking is lost', () => {
+      bridge.setSmoothing(0.8)
+
+      // Build pose filter state
+      const poseResult: HolisticResult = {
+        face: null,
+        pose: {
+          spine: { pitch: 0.3, yaw: 0.2, roll: 0.1 },
+          leftArm: { shoulder: { x: 0.5, y: 0.3, z: 0.1 }, elbow: { x: -0.5, y: 0, z: 0 } },
+          rightArm: { shoulder: { x: 0.5, y: -0.3, z: -0.1 }, elbow: { x: -0.5, y: 0, z: 0 } },
+        },
+        leftHand: null, rightHand: null,
+      }
+      bridge.update(poseResult)
+      bridge.update(poseResult)
+
+      // Lose pose tracking
+      bridge.update({ face: null, pose: null, leftHand: null, rightHand: null })
+
+      // Regain with different values
+      const mockRotationSet = vi.fn()
+      mockVrm.humanoid.getNormalizedBoneNode = vi.fn().mockReturnValue({
+        rotation: { set: mockRotationSet, x: 0, y: 0, z: 0 },
+      })
+
+      const newPoseResult: HolisticResult = {
+        face: null,
+        pose: {
+          spine: { pitch: -0.3, yaw: -0.2, roll: -0.1 },
+          leftArm: { shoulder: { x: -0.5, y: -0.3, z: -0.1 }, elbow: { x: 0.5, y: 0, z: 0 } },
+          rightArm: { shoulder: { x: -0.5, y: 0.3, z: 0.1 }, elbow: { x: 0.5, y: 0, z: 0 } },
+        },
+        leftHand: null, rightHand: null,
+      }
+      bridge.update(newPoseResult)
+
+      // The spine rotation should snap to the new values
+      const spineCalls = mockRotationSet.mock.calls
+      expect(spineCalls.length).toBeGreaterThan(0)
+      // First call should be spine with near -0.3 pitch
+      expect(spineCalls[0][0]).toBeCloseTo(-0.3, 1)
+    })
+
+    it('should reset hand filters when hand tracking is lost', () => {
+      bridge.setSmoothing(0.8)
+
+      // Build hand filter state
+      const handResult: HolisticResult = {
+        face: null, pose: null,
+        leftHand: {
+          thumb: { curl: 0.8, spread: 0.5 },
+          index: { curl: 0.8, spread: 0 },
+          middle: { curl: 0.8, spread: 0 },
+          ring: { curl: 0.8, spread: 0 },
+          pinky: { curl: 0.8, spread: 0 },
+        },
+        rightHand: null,
+      }
+      bridge.update(handResult)
+      bridge.update(handResult)
+
+      // Lose hand tracking
+      bridge.update({ face: null, pose: null, leftHand: null, rightHand: null })
+
+      // Regain with different values
+      const mockBone = { rotation: { set: vi.fn(), x: 0, y: 0, z: 0 } }
+      mockVrm.humanoid.getNormalizedBoneNode = vi.fn().mockReturnValue(mockBone)
+
+      const newHandResult: HolisticResult = {
+        face: null, pose: null,
+        leftHand: {
+          thumb: { curl: 0.1, spread: -0.5 },
+          index: { curl: 0.1, spread: 0 },
+          middle: { curl: 0.1, spread: 0 },
+          ring: { curl: 0.1, spread: 0 },
+          pinky: { curl: 0.1, spread: 0 },
+        },
+        rightHand: null,
+      }
+      bridge.update(newHandResult)
+
+      // Curl should be close to 0.1 (snapped), not interpolated from 0.8
+      // The bone X rotation = curl * PI/2, so for 0.1 it's ~0.157
+      expect(mockBone.rotation.x).toBeCloseTo(0.1 * Math.PI / 2, 1)
+    })
+  })
+
   describe('Euler order (VRM compatibility)', () => {
     it('should use ZYX Euler order for head rotation', () => {
       const mockRotationSet = vi.fn()

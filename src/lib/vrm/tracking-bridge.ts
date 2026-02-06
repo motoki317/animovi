@@ -33,6 +33,10 @@ export class TrackingBridge {
   private vrm: VRM
   private options: Required<TrackingBridgeOptions>
   private filters: FilterMap = new Map()
+  private prevFaceActive = false
+  private prevPoseActive = false
+  private prevLeftHandActive = false
+  private prevRightHandActive = false
 
   constructor(vrm: VRM, options: TrackingBridgeOptions = {}) {
     this.vrm = vrm
@@ -48,14 +52,25 @@ export class TrackingBridge {
    * Update VRM with tracking results
    */
   update(results: HolisticResult): void {
-    if (this.options.faceTracking && results.face) {
-      this.applyFaceTracking(results.face)
+    if (this.options.faceTracking) {
+      if (results.face) {
+        this.prevFaceActive = true
+        this.applyFaceTracking(results.face)
+      } else if (this.prevFaceActive) {
+        this.prevFaceActive = false
+        this.resetFiltersWithPrefix('head_', 'gaze')
+      }
     }
 
     if (this.options.poseTracking) {
       if (results.pose) {
+        this.prevPoseActive = true
         this.applyPoseTracking(results.pose)
       } else {
+        if (this.prevPoseActive) {
+          this.prevPoseActive = false
+          this.resetFiltersWithPrefix('spine_', 'leftUpperArm', 'rightUpperArm', 'leftLowerArm', 'rightLowerArm')
+        }
         // Apply natural "arms down" pose when tracking not available
         this.applyDefaultArmPose()
       }
@@ -63,10 +78,18 @@ export class TrackingBridge {
 
     if (this.options.handTracking) {
       if (results.leftHand) {
+        this.prevLeftHandActive = true
         this.applyHandTracking('left', results.leftHand)
+      } else if (this.prevLeftHandActive) {
+        this.prevLeftHandActive = false
+        this.resetFiltersWithPrefix('left')
       }
       if (results.rightHand) {
+        this.prevRightHandActive = true
         this.applyHandTracking('right', results.rightHand)
+      } else if (this.prevRightHandActive) {
+        this.prevRightHandActive = false
+        this.resetFiltersWithPrefix('right')
       }
     }
   }
@@ -249,6 +272,15 @@ export class TrackingBridge {
       this.filters.set(key, filter)
     }
     return filter.update(value)
+  }
+
+  /** Reset all Kalman filters whose key starts with any of the given prefixes */
+  private resetFiltersWithPrefix(...prefixes: string[]): void {
+    for (const key of this.filters.keys()) {
+      if (prefixes.some(p => key.startsWith(p))) {
+        this.filters.delete(key)
+      }
+    }
   }
 
   /**
