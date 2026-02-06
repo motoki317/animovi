@@ -42,6 +42,7 @@ function HomePageContent() {
     stream, // Pass stream so tracking can initialize when camera becomes available
     enabled: settings.faceTrackingEnabled || settings.poseTrackingEnabled || settings.handTrackingEnabled,
     smoothing: settings.smoothing,
+    targetFps: settings.trackingFps,
     faceTracking: settings.faceTrackingEnabled,
     poseTracking: settings.poseTrackingEnabled,
     handTracking: settings.handTrackingEnabled,
@@ -126,6 +127,7 @@ function HomePageContent() {
           cameraZ={settings.cameraZ}
           autoFrameOnLoad={settings.cameraAutoFrame}
           onAutoFrame={handleAutoFrame}
+          drawingFps={settings.drawingFps}
         />
       </div>
 
@@ -154,6 +156,10 @@ function HomePageContent() {
               onPoseTrackingChange={settings.setPoseTrackingEnabled}
               handTrackingEnabled={settings.handTrackingEnabled}
               onHandTrackingChange={settings.setHandTrackingEnabled}
+              trackingFps={settings.trackingFps}
+              onTrackingFpsChange={settings.setTrackingFps}
+              drawingFps={settings.drawingFps}
+              onDrawingFpsChange={settings.setDrawingFps}
               onVRMImport={loadFromFile}
               vrmLoading={vrmLoading}
             />

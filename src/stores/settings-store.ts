@@ -23,6 +23,10 @@ interface SettingsState {
   cameraZ: number
   cameraAutoFrame: boolean
 
+  // FPS limits
+  trackingFps: number
+  drawingFps: number
+
   // Panel visibility
   panelVisible: boolean
 
@@ -41,6 +45,10 @@ interface SettingsState {
   setCameraY: (y: number) => void
   setCameraZ: (z: number) => void
   setCameraAutoFrame: (enabled: boolean) => void
+
+  // Actions - FPS
+  setTrackingFps: (fps: number) => void
+  setDrawingFps: (fps: number) => void
 
   // Actions - Panel
   setPanelVisible: (visible: boolean) => void
@@ -66,6 +74,10 @@ export const useSettingsStore = create<SettingsState>()(
       cameraZ: 1.5,
       cameraAutoFrame: true,
 
+      // FPS limit defaults
+      trackingFps: 30,
+      drawingFps: 60,
+
       // Panel defaults
       panelVisible: true,
 
@@ -84,6 +96,10 @@ export const useSettingsStore = create<SettingsState>()(
       setCameraY: (cameraY) => set({ cameraY }),
       setCameraZ: (cameraZ) => set({ cameraZ }),
       setCameraAutoFrame: (cameraAutoFrame) => set({ cameraAutoFrame }),
+
+      // FPS actions
+      setTrackingFps: (trackingFps) => set({ trackingFps }),
+      setDrawingFps: (drawingFps) => set({ drawingFps }),
 
       // Panel actions
       setPanelVisible: (panelVisible) => set({ panelVisible }),

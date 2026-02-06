@@ -12,6 +12,10 @@ describe('SettingsPanel', () => {
     onPoseTrackingChange: vi.fn(),
     handTrackingEnabled: false,
     onHandTrackingChange: vi.fn(),
+    trackingFps: 30,
+    onTrackingFpsChange: vi.fn(),
+    drawingFps: 60,
+    onDrawingFpsChange: vi.fn(),
   }
 
   it('should render smoothing slider', () => {
@@ -71,5 +75,37 @@ describe('SettingsPanel', () => {
     const button = screen.getByTestId('import-vrm-button')
     expect(button).toBeDisabled()
     expect(button).toHaveTextContent('Loading...')
+  })
+
+  it('should render tracking FPS slider', () => {
+    render(<SettingsPanel {...defaultProps} />)
+
+    expect(screen.getByLabelText(/tracking fps/i)).toBeDefined()
+  })
+
+  it('should call onTrackingFpsChange when tracking FPS slider changes', () => {
+    const onTrackingFpsChange = vi.fn()
+    render(<SettingsPanel {...defaultProps} onTrackingFpsChange={onTrackingFpsChange} />)
+
+    const slider = screen.getByLabelText(/tracking fps/i)
+    fireEvent.change(slider, { target: { value: '15' } })
+
+    expect(onTrackingFpsChange).toHaveBeenCalledWith(15)
+  })
+
+  it('should render drawing FPS slider', () => {
+    render(<SettingsPanel {...defaultProps} />)
+
+    expect(screen.getByLabelText(/drawing fps/i)).toBeDefined()
+  })
+
+  it('should call onDrawingFpsChange when drawing FPS slider changes', () => {
+    const onDrawingFpsChange = vi.fn()
+    render(<SettingsPanel {...defaultProps} onDrawingFpsChange={onDrawingFpsChange} />)
+
+    const slider = screen.getByLabelText(/drawing fps/i)
+    fireEvent.change(slider, { target: { value: '30' } })
+
+    expect(onDrawingFpsChange).toHaveBeenCalledWith(30)
   })
 })

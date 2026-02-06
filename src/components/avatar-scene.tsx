@@ -19,6 +19,7 @@ interface AvatarSceneProps {
   autoFrameOnLoad?: boolean
   onAutoFrame?: (y: number, z: number) => void
   enableOrbitControls?: boolean
+  drawingFps?: number
 }
 
 export function AvatarScene({
@@ -30,6 +31,7 @@ export function AvatarScene({
   autoFrameOnLoad = true,
   onAutoFrame,
   enableOrbitControls = true,
+  drawingFps = 60,
 }: AvatarSceneProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
@@ -48,6 +50,10 @@ export function AvatarScene({
 
   // Track which VRM we've already auto-framed to prevent loops
   const autoFramedVrmRef = useRef<VRM | null>(null)
+
+  // Store drawing FPS in ref so render loop can access latest value
+  const drawingFpsRef = useRef(drawingFps)
+  drawingFpsRef.current = drawingFps
 
   // Store initial values in refs for initialization
   const initialBackgroundTypeRef = useRef(backgroundType)
@@ -114,12 +120,21 @@ export function AvatarScene({
       controlsRef.current = controls
     }
 
-    // Animation loop with VRM update
+    // Animation loop with VRM update and FPS limiting
     const clock = new THREE.Clock()
     clockRef.current = clock
     let animationId: number
-    function animate() {
+    let lastFrameTime = 0
+    function animate(timestamp = 0) {
       animationId = requestAnimationFrame(animate)
+
+      // Throttle to target drawing FPS
+      const frameInterval = 1000 / drawingFpsRef.current
+      if (timestamp - lastFrameTime < frameInterval) {
+        return
+      }
+      lastFrameTime = timestamp
+
       const deltaTime = clock.getDelta()
 
       controls?.update() // Required for damping

@@ -32,6 +32,8 @@ describe('useSettingsStore', () => {
       cameraZ: 1.5,
       cameraAutoFrame: true,
       panelVisible: true,
+      trackingFps: 30,
+      drawingFps: 60,
     })
   })
 
@@ -82,5 +84,25 @@ describe('useSettingsStore', () => {
 
     useSettingsStore.getState().togglePanel()
     expect(useSettingsStore.getState().panelVisible).toBe(true)
+  })
+
+  it('should initialize tracking FPS with default 30', () => {
+    const state = useSettingsStore.getState()
+    expect(state.trackingFps).toBe(30)
+  })
+
+  it('should update tracking FPS', () => {
+    useSettingsStore.getState().setTrackingFps(15)
+    expect(useSettingsStore.getState().trackingFps).toBe(15)
+  })
+
+  it('should initialize drawing FPS with default 60', () => {
+    const state = useSettingsStore.getState()
+    expect(state.drawingFps).toBe(60)
+  })
+
+  it('should update drawing FPS', () => {
+    useSettingsStore.getState().setDrawingFps(30)
+    expect(useSettingsStore.getState().drawingFps).toBe(30)
   })
 })

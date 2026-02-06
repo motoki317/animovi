@@ -15,6 +15,10 @@ export interface SettingsPanelProps {
   onPoseTrackingChange: (enabled: boolean) => void
   handTrackingEnabled: boolean
   onHandTrackingChange: (enabled: boolean) => void
+  trackingFps: number
+  onTrackingFpsChange: (fps: number) => void
+  drawingFps: number
+  onDrawingFpsChange: (fps: number) => void
   /** Optional: callback when a VRM file is selected for import */
   onVRMImport?: (file: File) => void
   /** Optional: whether VRM is currently loading */
@@ -30,6 +34,10 @@ export function SettingsPanel({
   onPoseTrackingChange,
   handTrackingEnabled,
   onHandTrackingChange,
+  trackingFps,
+  onTrackingFpsChange,
+  drawingFps,
+  onDrawingFpsChange,
   onVRMImport,
   vrmLoading = false,
 }: SettingsPanelProps) {
@@ -131,6 +139,38 @@ export function SettingsPanel({
             onChange={(e) => onHandTrackingChange(e.target.checked)}
           />
           {' '}Hand Tracking
+        </label>
+      </div>
+
+      <div style={{ marginBottom: '1rem', marginTop: '1rem' }}>
+        <label htmlFor="trackingFps">
+          Tracking FPS: {trackingFps}
+          <input
+            id="trackingFps"
+            type="range"
+            min="10"
+            max="60"
+            step="5"
+            value={trackingFps}
+            onChange={(e) => onTrackingFpsChange(parseInt(e.target.value, 10))}
+            style={{ display: 'block', width: '100%' }}
+          />
+        </label>
+      </div>
+
+      <div style={{ marginBottom: '1rem' }}>
+        <label htmlFor="drawingFps">
+          Drawing FPS: {drawingFps}
+          <input
+            id="drawingFps"
+            type="range"
+            min="15"
+            max="120"
+            step="5"
+            value={drawingFps}
+            onChange={(e) => onDrawingFpsChange(parseInt(e.target.value, 10))}
+            style={{ display: 'block', width: '100%' }}
+          />
         </label>
       </div>
     </div>
