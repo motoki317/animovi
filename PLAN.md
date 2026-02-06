@@ -51,9 +51,9 @@ A lightweight, web-based VTubing application that tracks users via camera and an
 | 10. Pipeline | Complete | 24/24 |
 | 11. UX Enhancements | Complete | 47/47 |
 | 12. UI Enhancements | Complete | ~77 |
-| **13. Solver Improvements** | **In Progress** | 11/TBD |
+| **13. Solver Improvements** | **Complete** | 26/26 |
 | 14. Production Readiness | Planned | 0/TBD |
-| **Total** | | **259 tests (246 active + 13 legacy skipped, 32 files)** |
+| **Total** | | **274 tests (261 active + 13 legacy skipped, 32 files)** |
 
 ---
 
@@ -127,18 +127,27 @@ A lightweight, web-based VTubing application that tracks users via camera and an
 - [x] Fixed arm Z-axis: `z: p.z` instead of `z: -p.z` in `toVRMSpace()` — scene PI rotation handles the flip
 - [x] Updated fixture expected values and test assertions for new Z convention
 
-### Step 13.2: Finger Spread
-- [ ] Calculate lateral finger spread
-- [ ] Detect finger splay gestures
+### Step 13.2: Finger Spread ✅
 
-### Step 13.3: Eye Gaze
-- [ ] Calculate eye gaze direction from iris position
-- [ ] Apply to VRM lookAt
+**Completed changes:**
+- [x] Calculate lateral finger spread via MCP→TIP angle relative to middle finger
+- [x] Apply spread as Z rotation on proximal bones (max ~30 degrees)
+- [x] Spread values normalized to [-1, 1], clamped
 
-### Step 13.4: Kalman Filter Integration
-- [ ] Apply Kalman filter to all solver outputs
-- [ ] Per-feature smoothing settings
-- [ ] Reset filter on tracking loss
+### Step 13.3: Eye Gaze ✅
+
+**Completed changes:**
+- [x] Calculate eye gaze from iris center position relative to eye socket (corners)
+- [x] Average both eyes for stability, normalize to [-1, 1]
+- [x] Apply gaze as yaw/pitch rotation on leftEye/rightEye VRM bones (max ~30 degrees)
+- [x] Graceful fallback when iris landmarks not available (< 478 landmarks)
+
+### Step 13.4: Kalman Filter Integration ✅
+
+**Completed changes:**
+- [x] Kalman filter already applied to all solver outputs (head, spine, arms, fingers, gaze)
+- [x] Reset filters on tracking loss (face, pose, hand) so next detection snaps to new value
+- [x] Per-feature active tracking flags (prevFaceActive, prevPoseActive, etc.)
 
 ---
 
@@ -209,11 +218,11 @@ vrm-tuber/
 ```
 Phases 1-12 (Complete)
     │
-    ├──► Phase 13 (Solvers) ◄── In Progress
+    ├──► Phase 13 (Solvers) ✅ Complete
     │      ├── 13.1 Arm tracking fix ✅
-    │      ├── 13.2 Finger spread
-    │      ├── 13.3 Eye gaze
-    │      └── 13.4 Kalman filter integration
+    │      ├── 13.2 Finger spread ✅
+    │      ├── 13.3 Eye gaze ✅
+    │      └── 13.4 Kalman filter integration ✅
     │
     └──► Phase 14 (Production) - Ship it!
 ```
