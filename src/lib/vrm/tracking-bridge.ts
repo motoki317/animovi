@@ -124,6 +124,16 @@ export class TrackingBridge {
       )
     }
 
+    // Apply eye gaze to eye bones
+    const gazeYaw = this.smoothValue('gazeX', face.eyes.gazeX) * (Math.PI / 6) // max ~30 degrees
+    const gazePitch = this.smoothValue('gazeY', -face.eyes.gazeY) * (Math.PI / 6) // invert: VRM +X = down
+    for (const eyeName of ['leftEye', 'rightEye'] as const) {
+      const eyeBone = this.vrm.humanoid.getNormalizedBoneNode(eyeName)
+      if (eyeBone) {
+        eyeBone.rotation.set(gazePitch, gazeYaw, 0, 'ZYX')
+      }
+    }
+
     // Apply blendshapes
     if (this.vrm.expressionManager) {
       this.applyBlendShape('blinkLeft', face.eyes.leftBlink)

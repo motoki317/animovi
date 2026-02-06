@@ -19,6 +19,8 @@ export interface FaceResult {
   eyes: {
     leftBlink: number
     rightBlink: number
+    gazeX: number // -1 = looking left, 0 = center, 1 = looking right (image space)
+    gazeY: number // -1 = looking down, 0 = center, 1 = looking up
   }
   mouth: {
     open: number
@@ -46,6 +48,51 @@ const EYE_OPEN_THRESHOLD = 0.02 // Typical open eye gap
 const MOUTH_OPEN_THRESHOLD = 0.1 // Max mouth opening
 const MOUTH_WIDTH_NEUTRAL = 0.2 // Typical neutral mouth width
 const MOUTH_WIDTH_SMILE = 0.35 // Typical smile width
+
+// Iris landmarks (MediaPipe 478-landmark model: 468 base + 10 iris)
+const LEFT_IRIS_CENTER = 468
+const RIGHT_IRIS_CENTER = 473
+// Eye inner corners (for calculating eye socket center)
+const LEFT_EYE_INNER = 133
+const RIGHT_EYE_INNER = 362
+
+/**
+ * Calculate eye gaze direction from iris position relative to eye socket.
+ * Averages both eyes for stability. Returns normalized values in [-1, 1].
+ */
+function calculateGaze(landmarks: FaceLandmarks): { gazeX: number; gazeY: number } {
+  // Check if iris landmarks are available (478-landmark model)
+  if (landmarks.length <= LEFT_IRIS_CENTER) {
+    return { gazeX: 0, gazeY: 0 }
+  }
+
+  const leftIris = landmarks[LEFT_IRIS_CENTER]
+  const rightIris = landmarks[RIGHT_IRIS_CENTER]
+
+  // Calculate eye socket centers from inner and outer corners
+  const leftEyeCenterX = (landmarks[LEFT_EYE_OUTER].x + landmarks[LEFT_EYE_INNER].x) / 2
+  const leftEyeCenterY = (landmarks[LEFT_EYE_UPPER].y + landmarks[LEFT_EYE_LOWER].y) / 2
+  const rightEyeCenterX = (landmarks[RIGHT_EYE_OUTER].x + landmarks[RIGHT_EYE_INNER].x) / 2
+  const rightEyeCenterY = (landmarks[RIGHT_EYE_UPPER].y + landmarks[RIGHT_EYE_LOWER].y) / 2
+
+  // Eye socket half-widths for normalization
+  const leftEyeHalfWidth = Math.abs(landmarks[LEFT_EYE_INNER].x - landmarks[LEFT_EYE_OUTER].x) / 2
+  const rightEyeHalfWidth = Math.abs(landmarks[RIGHT_EYE_INNER].x - landmarks[RIGHT_EYE_OUTER].x) / 2
+  const leftEyeHalfHeight = Math.abs(landmarks[LEFT_EYE_LOWER].y - landmarks[LEFT_EYE_UPPER].y) / 2
+  const rightEyeHalfHeight = Math.abs(landmarks[RIGHT_EYE_LOWER].y - landmarks[RIGHT_EYE_UPPER].y) / 2
+
+  // Iris displacement from eye center, normalized by eye socket size
+  const leftGazeX = leftEyeHalfWidth > 0.001 ? (leftIris.x - leftEyeCenterX) / leftEyeHalfWidth : 0
+  const leftGazeY = leftEyeHalfHeight > 0.001 ? -(leftIris.y - leftEyeCenterY) / leftEyeHalfHeight : 0
+  const rightGazeX = rightEyeHalfWidth > 0.001 ? (rightIris.x - rightEyeCenterX) / rightEyeHalfWidth : 0
+  const rightGazeY = rightEyeHalfHeight > 0.001 ? -(rightIris.y - rightEyeCenterY) / rightEyeHalfHeight : 0
+
+  // Average both eyes and clamp
+  const gazeX = Math.max(-1, Math.min(1, (leftGazeX + rightGazeX) / 2))
+  const gazeY = Math.max(-1, Math.min(1, (leftGazeY + rightGazeY) / 2))
+
+  return { gazeX, gazeY }
+}
 
 export function solveFace(landmarks: FaceLandmarks): FaceResult | null {
   if (landmarks.length === 0) {
@@ -79,6 +126,9 @@ export function solveFace(landmarks: FaceLandmarks): FaceResult | null {
   const leftBlink = Math.max(0, Math.min(1, 1 - leftEyeGap / EYE_OPEN_THRESHOLD))
   const rightBlink = Math.max(0, Math.min(1, 1 - rightEyeGap / EYE_OPEN_THRESHOLD))
 
+  // Calculate eye gaze from iris position relative to eye socket center
+  const { gazeX, gazeY } = calculateGaze(landmarks)
+
   // Calculate mouth open from lip distance
   const mouthGap = landmarks[LOWER_LIP].y - landmarks[UPPER_LIP].y
   const mouthOpen = Math.max(0, Math.min(1, mouthGap / MOUTH_OPEN_THRESHOLD))
@@ -90,7 +140,7 @@ export function solveFace(landmarks: FaceLandmarks): FaceResult | null {
 
   return {
     head: { pitch, yaw, roll },
-    eyes: { leftBlink, rightBlink },
+    eyes: { leftBlink, rightBlink, gazeX, gazeY },
     mouth: { open: mouthOpen, smile },
   }
 }

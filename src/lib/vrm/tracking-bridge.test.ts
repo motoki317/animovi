@@ -200,6 +200,43 @@ describe('TrackingBridge', () => {
     expect(ringBone.rotation.z).not.toBe(0)
   })
 
+  it('should apply eye gaze to VRM eye bones', () => {
+    const mockBones: Record<string, { rotation: { set: ReturnType<typeof vi.fn>; x: number; y: number; z: number } }> = {}
+    for (const name of ['leftEye', 'rightEye']) {
+      mockBones[name] = {
+        rotation: { set: vi.fn(), x: 0, y: 0, z: 0 },
+      }
+    }
+    mockVrm.humanoid.getNormalizedBoneNode = vi.fn().mockImplementation((name: string) => {
+      return mockBones[name] ?? { rotation: { set: vi.fn(), x: 0, y: 0, z: 0 } }
+    })
+
+    const trackingResult: HolisticResult = {
+      face: {
+        head: { pitch: 0, yaw: 0, roll: 0 },
+        eyes: { leftBlink: 0, rightBlink: 0, gazeX: 0.5, gazeY: -0.3 },
+        mouth: { open: 0, smile: 0 },
+      },
+      pose: null,
+      leftHand: null,
+      rightHand: null,
+    }
+
+    bridge.update(trackingResult)
+
+    // Eye bones should be requested
+    expect(mockVrm.humanoid.getNormalizedBoneNode).toHaveBeenCalledWith('leftEye')
+    expect(mockVrm.humanoid.getNormalizedBoneNode).toHaveBeenCalledWith('rightEye')
+
+    // Eye bones should have rotation applied via set()
+    expect(mockBones['leftEye'].rotation.set).toHaveBeenCalledWith(
+      expect.any(Number), // pitch (gazeY)
+      expect.any(Number), // yaw (gazeX)
+      0,                  // no roll
+      'ZYX'
+    )
+  })
+
   describe('Euler order (VRM compatibility)', () => {
     it('should use ZYX Euler order for head rotation', () => {
       const mockRotationSet = vi.fn()
