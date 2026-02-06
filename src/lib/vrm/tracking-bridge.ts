@@ -146,27 +146,40 @@ export class TrackingBridge {
       )
     }
 
-    // Apply arm rotations
-    this.applyArmBone('leftUpperArm', {
-      pitch: pose.leftArm.shoulder.x,
-      yaw: pose.leftArm.shoulder.y,
-      roll: pose.leftArm.shoulder.z,
-    })
-    this.applyArmBone('rightUpperArm', {
-      pitch: pose.rightArm.shoulder.x,
-      yaw: pose.rightArm.shoulder.y,
-      roll: pose.rightArm.shoulder.z,
-    })
-    this.applyArmBone('leftLowerArm', {
-      pitch: pose.leftArm.elbow.x,
-      yaw: pose.leftArm.elbow.y,
-      roll: pose.leftArm.elbow.z,
-    })
-    this.applyArmBone('rightLowerArm', {
-      pitch: pose.rightArm.elbow.x,
-      yaw: pose.rightArm.elbow.y,
-      roll: pose.rightArm.elbow.z,
-    })
+    // Apply arm rotations (fall back to default pose if arm not visible)
+    const armsDownAngle = Math.PI / 2.5
+
+    if (pose.leftArm) {
+      this.applyArmBone('leftUpperArm', {
+        pitch: pose.leftArm.shoulder.x,
+        yaw: pose.leftArm.shoulder.y,
+        roll: pose.leftArm.shoulder.z,
+      })
+      this.applyArmBone('leftLowerArm', {
+        pitch: pose.leftArm.elbow.x,
+        yaw: pose.leftArm.elbow.y,
+        roll: pose.leftArm.elbow.z,
+      })
+    } else {
+      this.applyArmBone('leftUpperArm', { pitch: 0, yaw: 0, roll: armsDownAngle })
+      this.applyArmBone('leftLowerArm', { pitch: 0, yaw: 0, roll: 0 })
+    }
+
+    if (pose.rightArm) {
+      this.applyArmBone('rightUpperArm', {
+        pitch: pose.rightArm.shoulder.x,
+        yaw: pose.rightArm.shoulder.y,
+        roll: pose.rightArm.shoulder.z,
+      })
+      this.applyArmBone('rightLowerArm', {
+        pitch: pose.rightArm.elbow.x,
+        yaw: pose.rightArm.elbow.y,
+        roll: pose.rightArm.elbow.z,
+      })
+    } else {
+      this.applyArmBone('rightUpperArm', { pitch: 0, yaw: 0, roll: -armsDownAngle })
+      this.applyArmBone('rightLowerArm', { pitch: 0, yaw: 0, roll: 0 })
+    }
   }
 
   private applyArmBone(boneName: string, rotation: EulerAngles): void {

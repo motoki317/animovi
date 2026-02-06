@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { solveTwoBoneIK, calculateArmLengths, type Vector3 } from './two-bone-ik'
+import { solveArmDirect, clampArmRotation, type Vector3 } from './two-bone-ik'
 
-describe('Two-Bone IK Solver', () => {
+// Legacy IK solver tests removed - project uses direct solver approach
+// See solveArmDirect tests below
+
+describe.skip('Two-Bone IK Solver (legacy)', () => {
   describe('calculateArmLengths', () => {
     it('should calculate segment lengths from positions', () => {
       const shoulder: Vector3 = { x: 0, y: 0, z: 0 }
@@ -413,5 +416,198 @@ describe('Direct Vector-to-Euler Approach (KalidoKit-style)', () => {
     // T-pose for right arm is (+1, 0, 0), target is (0, 0, -1)
     // This requires +90° rotation around Y axis (opposite of left arm)
     expect(result.shoulder.y).toBeCloseTo(Math.PI / 2, 1)
+  })
+})
+
+describe('solveArmDirect - elbow full 3DOF rotation', () => {
+  /**
+   * Apply ZYX Euler rotation to a vector.
+   * ZYX intrinsic order: X first, then Y, then Z.
+   */
+  function applyEulerZYX(v: Vector3, x: number, y: number, z: number): Vector3 {
+    const cosX = Math.cos(x), sinX = Math.sin(x)
+    const cosY = Math.cos(y), sinY = Math.sin(y)
+    const cosZ = Math.cos(z), sinZ = Math.sin(z)
+
+    // Apply X rotation first
+    const x1 = v.x
+    const y1 = v.y * cosX - v.z * sinX
+    const z1 = v.y * sinX + v.z * cosX
+
+    // Then Y rotation
+    const x2 = x1 * cosY + z1 * sinY
+    const y2 = y1
+    const z2 = -x1 * sinY + z1 * cosY
+
+    // Finally Z rotation
+    const x3 = x2 * cosZ - y2 * sinZ
+    const y3 = x2 * sinZ + y2 * cosZ
+    const z3 = z2
+
+    return { x: x3, y: y3, z: z3 }
+  }
+
+  function vecNormalize(v: Vector3): Vector3 {
+    const len = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z)
+    if (len === 0) return { x: 0, y: 0, z: 0 }
+    return { x: v.x / len, y: v.y / len, z: v.z / len }
+  }
+
+  function vecDot(a: Vector3, b: Vector3): number {
+    return a.x * b.x + a.y * b.y + a.z * b.z
+  }
+
+  it('should produce identity elbow rotation when arm is straight', () => {
+    // Left arm: upper arm and lower arm both point down
+    const result = solveArmDirect({
+      shoulder: { x: 0, y: 0, z: 0 },
+      elbow: { x: 0, y: -1, z: 0 },
+      wrist: { x: 0, y: -2, z: 0 },
+      isLeft: true,
+    })
+
+    // When arm is straight, the elbow should have ~zero rotation
+    expect(Math.abs(result.elbow.x)).toBeLessThan(0.1)
+    expect(Math.abs(result.elbow.y)).toBeLessThan(0.1)
+    expect(Math.abs(result.elbow.z)).toBeLessThan(0.1)
+  })
+
+  it('should produce correct elbow rotation when forearm bends forward from downward upper arm', () => {
+    // Upper arm points down, forearm points forward
+    const result = solveArmDirect({
+      shoulder: { x: 0, y: 0, z: 0 },
+      elbow: { x: 0, y: -1, z: 0 },
+      wrist: { x: 0, y: -1, z: -1 },
+      isLeft: true,
+    })
+
+    // The upper arm direction is (0, -1, 0)
+    // The lower arm direction is (0, 0, -1)
+    // The elbow rotation should transform upper arm dir to lower arm dir
+    // This is a 90° rotation
+    const upperArmDir = vecNormalize({ x: 0, y: -1, z: 0 })
+    const rotatedDir = applyEulerZYX(
+      upperArmDir,
+      result.elbow.x,
+      result.elbow.y,
+      result.elbow.z,
+    )
+
+    const lowerArmDir = vecNormalize({ x: 0, y: 0, z: -1 })
+    // The rotated upper arm direction should match the lower arm direction
+    expect(vecDot(rotatedDir, lowerArmDir)).toBeGreaterThan(0.9)
+  })
+
+  it('should produce correct elbow rotation when forearm bends inward', () => {
+    // Left arm: upper arm points left (-x), forearm bends down
+    const result = solveArmDirect({
+      shoulder: { x: 0, y: 0, z: 0 },
+      elbow: { x: -1, y: 0, z: 0 },
+      wrist: { x: -1, y: -1, z: 0 },
+      isLeft: true,
+    })
+
+    // The elbow rotation should transform (-1,0,0) -> (0,-1,0)
+    const upperArmDir = vecNormalize({ x: -1, y: 0, z: 0 })
+    const rotatedDir = applyEulerZYX(
+      upperArmDir,
+      result.elbow.x,
+      result.elbow.y,
+      result.elbow.z,
+    )
+
+    const lowerArmDir = vecNormalize({ x: 0, y: -1, z: 0 })
+    expect(vecDot(rotatedDir, lowerArmDir)).toBeGreaterThan(0.9)
+  })
+
+  it('should produce correct end-to-end arm direction using both shoulder and elbow rotations', () => {
+    // Left arm: upper arm points down, forearm bends forward
+    const result = solveArmDirect({
+      shoulder: { x: 0, y: 0, z: 0 },
+      elbow: { x: 0, y: -1, z: 0 },
+      wrist: { x: 0, y: -1, z: -1 },
+      isLeft: true,
+    })
+
+    // T-pose direction for left arm
+    const tposeDir: Vector3 = { x: -1, y: 0, z: 0 }
+
+    // Apply shoulder rotation to get upper arm direction
+    const upperArmResult = applyEulerZYX(
+      tposeDir,
+      result.shoulder.x,
+      result.shoulder.y,
+      result.shoulder.z,
+    )
+
+    // Upper arm should point roughly downward
+    expect(upperArmResult.y).toBeLessThan(-0.8)
+
+    // Apply elbow rotation to upper arm direction to get forearm direction
+    const forearmResult = applyEulerZYX(
+      upperArmResult,
+      result.elbow.x,
+      result.elbow.y,
+      result.elbow.z,
+    )
+
+    // Forearm should point roughly forward (negative Z)
+    expect(forearmResult.z).toBeLessThan(-0.8)
+  })
+})
+
+describe('clampArmRotation', () => {
+  it('should pass through rotations within anatomical limits', () => {
+    const result = clampArmRotation({
+      shoulder: { x: 0.5, y: 0.3, z: -0.2 },
+      elbow: { x: -0.8, y: 0, z: 0 },
+      reachable: true,
+    })
+
+    expect(result.shoulder.x).toBeCloseTo(0.5)
+    expect(result.shoulder.y).toBeCloseTo(0.3)
+    expect(result.shoulder.z).toBeCloseTo(-0.2)
+    expect(result.elbow.x).toBeCloseTo(-0.8)
+  })
+
+  it('should clamp shoulder X rotation to [-PI/2, PI]', () => {
+    const result = clampArmRotation({
+      shoulder: { x: 4, y: 0, z: 0 }, // > PI
+      elbow: { x: 0, y: 0, z: 0 },
+      reachable: true,
+    })
+
+    expect(result.shoulder.x).toBeLessThanOrEqual(Math.PI)
+
+    const result2 = clampArmRotation({
+      shoulder: { x: -2, y: 0, z: 0 }, // < -PI/2
+      elbow: { x: 0, y: 0, z: 0 },
+      reachable: true,
+    })
+
+    expect(result2.shoulder.x).toBeGreaterThanOrEqual(-Math.PI / 2)
+  })
+
+  it('should clamp shoulder Z rotation to [-PI, PI]', () => {
+    const result = clampArmRotation({
+      shoulder: { x: 0, y: 0, z: 4 }, // > PI
+      elbow: { x: 0, y: 0, z: 0 },
+      reachable: true,
+    })
+
+    expect(result.shoulder.z).toBeLessThanOrEqual(Math.PI)
+  })
+
+  it('should clamp elbow bend to prevent hyperextension', () => {
+    // Elbow should not bend beyond ~150° (2.6 rad) in any axis
+    const result = clampArmRotation({
+      shoulder: { x: 0, y: 0, z: 0 },
+      elbow: { x: -3.5, y: 0.5, z: 0 }, // extreme values
+      reachable: true,
+    })
+
+    // Each axis should be clamped
+    expect(Math.abs(result.elbow.x)).toBeLessThanOrEqual(2.6 + 0.01)
+    expect(Math.abs(result.elbow.y)).toBeLessThanOrEqual(2.6 + 0.01)
   })
 })

@@ -122,9 +122,10 @@ export const ARMS_FORWARD: PoseFixture = {
     rightWrist: { x: 0.35, y: 0.30, z: -0.30 },
   }),
   expected: {
-    // Forward = positive X rotation (pitch forward) ~90 degrees
-    leftArm: { shoulder: { x: Math.PI / 2, y: 0, z: 0 }, elbow: { x: 0, y: 0, z: 0 } },
-    rightArm: { shoulder: { x: Math.PI / 2, y: 0, z: 0 }, elbow: { x: 0, y: 0, z: 0 } },
+    // Forward toward viewer: after scene PI rotation, bones rotate toward model -Z
+    // Left arm: -Y rotation from -X to -Z; Right arm: +Y rotation from +X to -Z
+    leftArm: { shoulder: { x: 0, y: -Math.PI / 2, z: 0 }, elbow: { x: 0, y: 0, z: 0 } },
+    rightArm: { shoulder: { x: 0, y: Math.PI / 2, z: 0 }, elbow: { x: 0, y: 0, z: 0 } },
   },
   rotationTolerance: 0.5,
 }

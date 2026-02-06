@@ -33,7 +33,7 @@ export interface TwoBoneIKInput {
 export interface TwoBoneIKResult {
   /** Shoulder rotation in euler angles (pitch=X, yaw=Y, roll=Z) */
   shoulder: { x: number; y: number; z: number }
-  /** Elbow rotation (only X for bend) */
+  /** Elbow rotation (full 3DOF relative to upper arm) */
   elbow: { x: number; y: number; z: number }
   /** Whether the target was reachable */
   reachable: boolean
@@ -397,20 +397,39 @@ export function solveArmDirect(input: DirectArmInput): TwoBoneIKResult {
   // Lower arm direction: elbow → wrist
   const lowerArmDir = sub(wrist, elbow)
 
-  // Elbow bend: angle between upper and lower arm directions
+  // Elbow rotation: rotation FROM upper arm direction TO lower arm direction
+  // This gives the full 3DOF local rotation of the forearm relative to the upper arm
   const upperLen = length(upperArmDir)
   const lowerLen = length(lowerArmDir)
 
-  let elbowBend = 0
+  let elbowRot = { x: 0, y: 0, z: 0 }
   if (upperLen > 0.001 && lowerLen > 0.001) {
-    const dotProduct = dot(upperArmDir, lowerArmDir) / (upperLen * lowerLen)
-    const angleBetween = Math.acos(clamp(dotProduct, -1, 1))
-    elbowBend = angleBetween // 0 when straight, increases as arm bends
+    elbowRot = directionToEulerZYX(upperArmDir, lowerArmDir)
   }
 
   return {
     shoulder: shoulderRot,
-    elbow: { x: -elbowBend, y: 0, z: 0 }, // Negative X for flexion
+    elbow: elbowRot,
     reachable: true, // Always "reachable" since we use actual positions
+  }
+}
+
+/**
+ * Clamp arm rotations to anatomical limits.
+ * Prevents unnatural over-rotation that makes arms look broken.
+ */
+export function clampArmRotation(result: TwoBoneIKResult): TwoBoneIKResult {
+  return {
+    shoulder: {
+      x: clamp(result.shoulder.x, -Math.PI / 2, Math.PI),
+      y: clamp(result.shoulder.y, -Math.PI, Math.PI),
+      z: clamp(result.shoulder.z, -Math.PI, Math.PI),
+    },
+    elbow: {
+      x: clamp(result.elbow.x, -2.6, 2.6),
+      y: clamp(result.elbow.y, -2.6, 2.6),
+      z: clamp(result.elbow.z, -2.6, 2.6),
+    },
+    reachable: result.reachable,
   }
 }
