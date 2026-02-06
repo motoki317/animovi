@@ -48,7 +48,7 @@ export function useVRMLoader(): UseVRMLoaderResult {
             if (mat && typeof mat === 'object') {
               for (const value of Object.values(mat as Record<string, unknown>)) {
                 if (value && typeof value === 'object' && 'isTexture' in value) {
-                  (value as { dispose: () => void }).dispose()
+                  (value as unknown as { dispose: () => void }).dispose()
                 }
               }
               (mat as { dispose?: () => void }).dispose?.()
