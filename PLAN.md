@@ -41,18 +41,7 @@ A lightweight, web-based VTubing application that tracks users via camera and an
 
 ---
 
-## Performance Targets
-
-| Metric | Target | Strategy |
-|--------|--------|----------|
-| Frame time | <16ms (60fps) | Web Worker isolation |
-| Bundle size | <500KB gzipped | Lazy load 3D, CDN for WASM |
-| First paint | <2s | Code splitting |
-| Memory | <200MB | VRM optimization utils |
-
----
-
-## Implementation Status Summary
+## Implementation Status
 
 | Phase | Status | Tests |
 |-------|--------|-------|
@@ -61,14 +50,14 @@ A lightweight, web-based VTubing application that tracks users via camera and an
 | 9. MediaPipe | Complete | 30/30 |
 | 10. Pipeline | Complete | 24/24 |
 | 11. UX Enhancements | Complete | 47/47 |
-| **12. UI Enhancements** | **Planned** | 0/TBD |
-| 13. Solver Improvements | Planned | 0/TBD |
+| 12. UI Enhancements | Complete | ~77 |
+| **13. Solver Improvements** | **In Progress** | 11/TBD |
 | 14. Production Readiness | Planned | 0/TBD |
-| **Total** | **166+ tests passing** | |
+| **Total** | | **259 tests (246 active + 13 legacy skipped, 32 files)** |
 
 ---
 
-## Completed Phases (1-11)
+## Completed Phases (1-12)
 
 <details>
 <summary>Click to expand completed phases</summary>
@@ -105,139 +94,51 @@ A lightweight, web-based VTubing application that tracks users via camera and an
 - BackgroundSettings (colors, transparency)
 - Manual VRM import button in SettingsPanel
 
+### Phase 12: UI Enhancements
+- Camera position controls (Y height, Z distance sliders)
+- Auto-frame to VRM face position on load
+- Background settings integration (solid color, transparent for OBS)
+- Collapsible settings panel with H key shortcut + hover-to-restore
+- Settings panel renders as overlay (character always centered in full window)
+- Tracking feature toggles (face/pose/hands) properly wired to TrackingBridge
+- Tracking debug overlay (D key)
+
 </details>
-
----
-
-## Phase 12: UI Enhancements
-
-**Goal:** Add camera controls, complete background integration, and enable OBS-friendly mode.
-
-### Step 12.1: Camera Position Controls
-**Tests:**
-- [ ] Should allow manual camera Y position adjustment (vertical)
-- [ ] Should allow manual camera Z position adjustment (zoom/distance)
-- [ ] Should auto-frame to VRM face position on load
-- [ ] Should persist camera settings
-
-**Technical Notes:**
-- Current camera is hardcoded at `position.set(0, 1.3, 1.5)` in `avatar-scene.tsx`
-- Auto-framing possible via `vrm.humanoid.getNormalizedBoneNode('head')` to get head position
-- Can compute bounding box with `THREE.Box3().setFromObject(vrm.scene)`
-
-**Implementation:**
-- Extend `settings-store.ts` with camera position state (`cameraY`, `cameraZ`, `cameraAutoFrame`)
-- Add camera controls to `settings-panel.tsx` (Y slider, Z slider, auto-frame button)
-- Update `avatar-scene.tsx` to accept dynamic camera position props
-- Implement auto-framing using VRM humanoid head bone position
-
-### Step 12.2: Background Settings Integration
-**Tests:**
-- [ ] Should display background settings in sidebar
-- [ ] Should change avatar scene background color
-- [ ] Should show preset colors including green, red, and blue
-- [ ] Should support transparent background for OBS
-
-**Technical Notes:**
-- `BackgroundSettings` component EXISTS but is NOT integrated into `page.tsx`
-- Preset colors already include Green (`#00ff00`) and Blue (`#0000ff`)
-- Need to add Red (`#ff0000`) to PRESET_COLORS
-- Need to wire background state to `AvatarScene` component
-
-**Implementation:**
-- Add background state to `settings-store.ts` (`backgroundType`, `backgroundColor`)
-- Integrate `BackgroundSettings` into `page.tsx` sidebar
-- Add red to `PRESET_COLORS` array in `background-settings.tsx`
-- Wire background config to `AvatarScene` via props
-
-### Step 12.3: Collapsible Settings Panel (OBS Mode)
-**Tests:**
-- [ ] Should hide panel when toggle button clicked
-- [ ] Should show panel on mouse hover over trigger zone
-- [ ] Should animate panel slide in/out smoothly
-- [ ] Should remember panel visibility preference
-- [ ] Should provide keyboard shortcut (H key)
-
-**Technical Notes:**
-- Current sidebar is always visible at 300px width
-- Need invisible hover zone at right edge to restore panel
-- Consider "OBS Mode" toggle that hides panel + enables transparent background
-
-**Implementation:**
-- Add panel visibility state to `settings-store.ts` (`panelVisible`)
-- Implement hide/show logic in `page.tsx`
-- Create `PanelTrigger` component for hover detection
-- Add CSS transitions for smooth animation
-- Add keyboard shortcut handler (H key to toggle)
-
-### Step 12.4: Next.js Logo Removal
-**Status:** NOT NEEDED
-
-Investigation found NO Next.js logo in the application code:
-- `src/app/layout.tsx` - Clean, no logo
-- `src/app/page.tsx` - No logo imports
-- No SVG or image files for logos
-
-The "N" icon visible in screenshots is likely a **browser extension** (e.g., Notion Web Clipper), not part of the application.
-
----
-
-## Known Issues
-
-### Arm Tracking Accuracy (2026-02-05)
-
-**Status:** Partially working, needs investigation
-
-**Current State:**
-- Implemented ZYX Euler order for VRM bones
-- Replaced IK with KalidoKit-style direct vector-to-euler approach
-- Arms no longer rotate violently
-- Arms do respond to movement
-
-**Remaining Issues:**
-- Arm rotation and locations still not quite correct
-- Elbows appear stiff (may not be bending visibly)
-- Need to compare against KalidoKit's actual implementation more closely
-
-**Potential Causes:**
-1. Coordinate system transformation might still have issues
-2. KalidoKit uses scaling factors and clamping we haven't implemented
-3. May need to look at how other projects handle the shoulder-elbow-wrist chain
-
-**Files Involved:**
-- `src/lib/math/two-bone-ik.ts` - solveArmDirect()
-- `src/lib/solver/pose-solver.ts` - toVRMSpace(), solveArm()
-- `src/lib/vrm/tracking-bridge.ts` - applyArmBone()
 
 ---
 
 ## Phase 13: Solver Improvements
 
-**Goal:** Complete the partially implemented solvers.
+**Goal:** Improve tracking accuracy and completeness.
 
-### Step 13.1: Arm Tracking
-**Tests:**
-- [ ] Should calculate shoulder rotation from landmarks
-- [ ] Should calculate elbow bend angle
-- [ ] Should handle partial arm visibility
-- [ ] Should mirror for left/right arms correctly
+### Step 13.1: Arm Tracking Fix ✅
+
+**Completed changes:**
+- [x] Fixed elbow rotation: full 3DOF `directionToEulerZYX(upperArmDir, lowerArmDir)` instead of single scalar
+- [x] Added anatomical clamping (`clampArmRotation`) for shoulder and elbow limits
+- [x] Partial arm visibility: null arms when elbow/wrist not visible, fallback to default pose
+- [x] TrackingBridge handles null arms gracefully (falls back to arms-down pose)
+- [x] Legacy IK solver tests skipped (dead code from old approach)
+
+### Step 13.1b: Tracking Inversion Fix ✅
+
+**Completed changes:**
+- [x] Fixed face pitch sign: `(forehead.z - chin.z)` instead of `(chin.z - forehead.z)` to match VRM +X = forward/down
+- [x] Fixed arm Z-axis: `z: p.z` instead of `z: -p.z` in `toVRMSpace()` — scene PI rotation handles the flip
+- [x] Updated fixture expected values and test assertions for new Z convention
 
 ### Step 13.2: Finger Spread
-**Tests:**
-- [ ] Should calculate lateral finger spread
-- [ ] Should detect finger splay gestures
+- [ ] Calculate lateral finger spread
+- [ ] Detect finger splay gestures
 
 ### Step 13.3: Eye Gaze
-**Tests:**
-- [ ] Should calculate eye gaze direction
-- [ ] Should track iris position
-- [ ] Should apply to VRM lookAt
+- [ ] Calculate eye gaze direction from iris position
+- [ ] Apply to VRM lookAt
 
 ### Step 13.4: Kalman Filter Integration
-**Tests:**
-- [ ] Should apply Kalman filter to all solver outputs
-- [ ] Should respect per-feature smoothing settings
-- [ ] Should reset filter on tracking loss
+- [ ] Apply Kalman filter to all solver outputs
+- [ ] Per-feature smoothing settings
+- [ ] Reset filter on tracking loss
 
 ---
 
@@ -246,24 +147,20 @@ The "N" icon visible in screenshots is likely a **browser extension** (e.g., Not
 **Goal:** Prepare for deployment and real-world use.
 
 ### Step 14.1: Bundle Optimization
-- Code splitting configuration
-- Dynamic imports
+- Code splitting, dynamic imports
 - Bundle analysis (target: <500KB gzipped)
 
 ### Step 14.2: PWA Support
 - Service worker for asset caching
-- Web manifest
-- Offline fallback
+- Web manifest, offline fallback
 
 ### Step 14.3: Cross-Browser Testing
 - Browser/feature detection
 - WebGL2, Workers support check
-- Polyfills where needed
 
 ### Step 14.4: Error Tracking
 - Error boundary with reporting
 - Performance metrics collection
-- Privacy-respecting analytics
 
 ---
 
@@ -281,11 +178,12 @@ vrm-tuber/
 │   │   ├── error-boundary.tsx
 │   │   ├── loading-skeleton.tsx
 │   │   ├── settings-panel.tsx
+│   │   ├── tracking-debug-overlay.tsx
 │   │   └── vrm-drop-zone.tsx
 │   ├── hooks/
-│   │   ├── use-camera.ts
 │   │   ├── use-tracking.ts
-│   │   └── use-vrm-loader.ts
+│   │   ├── use-vrm-loader.ts
+│   │   └── use-vrm-tracking.ts
 │   ├── lib/
 │   │   ├── capture/frame-capture.ts
 │   │   ├── integration/pipeline.ts
@@ -301,29 +199,24 @@ vrm-tuber/
 │   └── types/
 ├── tests/e2e/
 ├── vitest.config.ts
-├── playwright.config.ts
 └── PLAN.md
 ```
 
 ---
 
-## Phase Priority & Dependencies
+## Phase Priority
 
 ```
-Phases 1-11 (Complete)
+Phases 1-12 (Complete)
     │
-    ▼
-Phase 12 (UI Enhancements) ◄── Current Priority
-    │
-    ├──► Phase 13 (Solvers) - Feature completeness
+    ├──► Phase 13 (Solvers) ◄── In Progress
+    │      ├── 13.1 Arm tracking fix ✅
+    │      ├── 13.2 Finger spread
+    │      ├── 13.3 Eye gaze
+    │      └── 13.4 Kalman filter integration
     │
     └──► Phase 14 (Production) - Ship it!
 ```
-
-**Recommended Order for Phase 12:**
-1. **12.2 Background Integration** - Very Low effort (1-2h), high impact
-2. **12.1 Camera Position Controls** - Medium effort (4-6h), high impact
-3. **12.3 Collapsible Panel** - Medium effort (3-4h), enables OBS capture
 
 ---
 
@@ -333,21 +226,3 @@ Phase 12 (UI Enhancements) ◄── Current Priority
 - [MediaPipe Tasks Vision](https://ai.google.dev/edge/mediapipe/solutions/guide)
 - [@pixiv/three-vrm](https://github.com/pixiv/three-vrm)
 - [Wawa Sensei Tutorial](https://wawasensei.dev/tuto/vrm-avatar-with-threejs-react-three-fiber-and-mediapipe)
-
----
-
-## Changelog
-
-### 2026-02-04 (Phase 12 Planning)
-- Analyzed feature requests for camera controls, background colors, collapsible panel
-- Confirmed auto-framing to VRM face is FEASIBLE using `vrm.humanoid.getNormalizedBoneNode('head')`
-- Found `BackgroundSettings` component exists but not integrated (green already in presets!)
-- Confirmed NO Next.js logo exists in app (likely browser extension)
-- Condensed completed phases into collapsible section
-- Added Phase 12 with detailed technical notes and implementation steps
-
-### 2026-02-04 (Phase 8-11 Complete)
-- Phases 8-11 implemented with TDD approach
-- Total: **166 tests passing** across 27+ test files
-- Added VRM import button to SettingsPanel
-- Fixed TypeScript build errors
