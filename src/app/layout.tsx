@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import type { Metadata, Viewport } from 'next'
 import { PWARegister } from '../components/pwa-register'
+import { GlobalErrorHandler } from '../components/global-error-handler'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -25,6 +26,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en">
       <body>
         <PWARegister />
+        <GlobalErrorHandler />
         {children}
       </body>
     </html>
