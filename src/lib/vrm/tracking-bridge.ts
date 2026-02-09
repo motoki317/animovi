@@ -29,6 +29,17 @@ interface EulerAngles {
 
 type FilterMap = Map<string, KalmanFilter>
 
+const FAST_RESPONSIVENESS = 0.9
+
+const FAST_RESPONSE_KEYS = new Set([
+  'gazeX',
+  'gazeY',
+  'blendshape_blinkLeft',
+  'blendshape_blinkRight',
+  'blendshape_aa',
+  'blendshape_happy',
+])
+
 export class TrackingBridge {
   private vrm: VRM
   private options: Required<TrackingBridgeOptions>
@@ -268,7 +279,10 @@ export class TrackingBridge {
   private smoothValue(key: string, value: number): number {
     let filter = this.filters.get(key)
     if (!filter) {
-      filter = new KalmanFilter({ responsiveness: 1 - this.options.smoothing })
+      const responsiveness = FAST_RESPONSE_KEYS.has(key)
+        ? FAST_RESPONSIVENESS
+        : 1 - this.options.smoothing
+      filter = new KalmanFilter({ responsiveness })
       this.filters.set(key, filter)
     }
     return filter.update(value)

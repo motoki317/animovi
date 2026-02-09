@@ -458,6 +458,229 @@ describe('TrackingBridge', () => {
     })
   })
 
+  describe('fast-response smoothing for eye and mouth', () => {
+    it('should apply near-instant smoothing to eye blinks', () => {
+      bridge = new TrackingBridge(mockVrm, { smoothing: 0.8 })
+
+      // Frame 1: initialize filters
+      bridge.update({
+        face: {
+          head: { pitch: 0, yaw: 0, roll: 0 },
+          eyes: { leftBlink: 0, rightBlink: 0, gazeX: 0, gazeY: 0 },
+          mouth: { open: 0, smile: 0 },
+        },
+        pose: null, leftHand: null, rightHand: null,
+      })
+
+      // Frame 2: jump to 1.0
+      bridge.update({
+        face: {
+          head: { pitch: 0, yaw: 0, roll: 0 },
+          eyes: { leftBlink: 1, rightBlink: 1, gazeX: 0, gazeY: 0 },
+          mouth: { open: 0, smile: 0 },
+        },
+        pose: null, leftHand: null, rightHand: null,
+      })
+
+      // With fast responsiveness (0.9), blink should be close to 0.9 after one frame
+      // (0 + 0.9 * (1 - 0) = 0.9)
+      const setValue = mockVrm.expressionManager!.setValue as ReturnType<typeof vi.fn>
+      const blinkLeftCalls = setValue.mock.calls.filter((c: unknown[]) => c[0] === 'blinkLeft')
+      const lastBlinkLeft = blinkLeftCalls[blinkLeftCalls.length - 1][1] as number
+      expect(lastBlinkLeft).toBeCloseTo(0.9, 1)
+    })
+
+    it('should apply near-instant smoothing to eye gaze', () => {
+      bridge = new TrackingBridge(mockVrm, { smoothing: 0.8 })
+      const mockRotationSet = vi.fn()
+      mockVrm.humanoid.getNormalizedBoneNode = vi.fn().mockReturnValue({
+        rotation: { set: mockRotationSet, x: 0, y: 0, z: 0 },
+      })
+
+      // Frame 1: initialize
+      bridge.update({
+        face: {
+          head: { pitch: 0, yaw: 0, roll: 0 },
+          eyes: { leftBlink: 0, rightBlink: 0, gazeX: 0, gazeY: 0 },
+          mouth: { open: 0, smile: 0 },
+        },
+        pose: null, leftHand: null, rightHand: null,
+      })
+
+      // Frame 2: gaze jumps to 1.0
+      bridge.update({
+        face: {
+          head: { pitch: 0, yaw: 0, roll: 0 },
+          eyes: { leftBlink: 0, rightBlink: 0, gazeX: 1, gazeY: 0 },
+          mouth: { open: 0, smile: 0 },
+        },
+        pose: null, leftHand: null, rightHand: null,
+      })
+
+      // gazeX with fast responsiveness: 0 + 0.9 * (1 - 0) = 0.9
+      // Applied as yaw: 0.9 * (PI/6)
+      const eyeCalls = mockRotationSet.mock.calls.filter(
+        (c: unknown[]) => c[3] === 'ZYX' && (c[1] as number) !== 0
+      )
+      // At least one eye bone should have non-zero yaw close to 0.9 * PI/6
+      expect(eyeCalls.length).toBeGreaterThan(0)
+      expect(eyeCalls[eyeCalls.length - 1][1]).toBeCloseTo(0.9 * (Math.PI / 6), 1)
+    })
+
+    it('should apply near-instant smoothing to mouth movements', () => {
+      bridge = new TrackingBridge(mockVrm, { smoothing: 0.8 })
+
+      // Frame 1: initialize
+      bridge.update({
+        face: {
+          head: { pitch: 0, yaw: 0, roll: 0 },
+          eyes: { leftBlink: 0, rightBlink: 0, gazeX: 0, gazeY: 0 },
+          mouth: { open: 0, smile: 0 },
+        },
+        pose: null, leftHand: null, rightHand: null,
+      })
+
+      // Frame 2: mouth opens
+      bridge.update({
+        face: {
+          head: { pitch: 0, yaw: 0, roll: 0 },
+          eyes: { leftBlink: 0, rightBlink: 0, gazeX: 0, gazeY: 0 },
+          mouth: { open: 1, smile: 1 },
+        },
+        pose: null, leftHand: null, rightHand: null,
+      })
+
+      // With fast responsiveness (0.9): 0 + 0.9 * (1 - 0) = 0.9
+      const setValue = mockVrm.expressionManager!.setValue as ReturnType<typeof vi.fn>
+      const aaCalls = setValue.mock.calls.filter((c: unknown[]) => c[0] === 'aa')
+      const lastAa = aaCalls[aaCalls.length - 1][1] as number
+      expect(lastAa).toBeCloseTo(0.9, 1)
+
+      const happyCalls = setValue.mock.calls.filter((c: unknown[]) => c[0] === 'happy')
+      const lastHappy = happyCalls[happyCalls.length - 1][1] as number
+      expect(lastHappy).toBeCloseTo(0.9, 1)
+    })
+
+    it('should use global smoothing for head rotation', () => {
+      // smoothing=0.8 → responsiveness=0.2 for normal keys
+      bridge = new TrackingBridge(mockVrm, { smoothing: 0.8 })
+      const mockRotationSet = vi.fn()
+      mockVrm.humanoid.getNormalizedBoneNode = vi.fn().mockReturnValue({
+        rotation: { set: mockRotationSet, x: 0, y: 0, z: 0 },
+      })
+
+      // Frame 1: initialize at 0
+      bridge.update({
+        face: {
+          head: { pitch: 0, yaw: 0, roll: 0 },
+          eyes: { leftBlink: 0, rightBlink: 0, gazeX: 0, gazeY: 0 },
+          mouth: { open: 0, smile: 0 },
+        },
+        pose: null, leftHand: null, rightHand: null,
+      })
+
+      mockRotationSet.mockClear()
+
+      // Frame 2: head pitch jumps to 1.0
+      bridge.update({
+        face: {
+          head: { pitch: 1, yaw: 0, roll: 0 },
+          eyes: { leftBlink: 0, rightBlink: 0, gazeX: 0, gazeY: 0 },
+          mouth: { open: 0, smile: 0 },
+        },
+        pose: null, leftHand: null, rightHand: null,
+      })
+
+      // Head uses global smoothing: responsiveness = 1 - 0.8 = 0.2
+      // So pitch = 0 + 0.2 * (1 - 0) = 0.2
+      const headCall = mockRotationSet.mock.calls.find(
+        (c: unknown[]) => c[3] === 'ZYX' && c[0] !== 0
+      )
+      expect(headCall).toBeDefined()
+      expect(headCall![0]).toBeCloseTo(0.2, 1)
+    })
+
+    it('should use global smoothing for spine rotation', () => {
+      bridge = new TrackingBridge(mockVrm, { smoothing: 0.8 })
+      const mockRotationSet = vi.fn()
+      mockVrm.humanoid.getNormalizedBoneNode = vi.fn().mockReturnValue({
+        rotation: { set: mockRotationSet, x: 0, y: 0, z: 0 },
+      })
+
+      // Frame 1: initialize
+      bridge.update({
+        face: null,
+        pose: {
+          spine: { pitch: 0, yaw: 0, roll: 0 },
+          leftArm: { shoulder: { x: 0, y: 0, z: 0 }, elbow: { x: 0, y: 0, z: 0 } },
+          rightArm: { shoulder: { x: 0, y: 0, z: 0 }, elbow: { x: 0, y: 0, z: 0 } },
+        },
+        leftHand: null, rightHand: null,
+      })
+
+      mockRotationSet.mockClear()
+
+      // Frame 2: spine pitch jumps to 1.0
+      bridge.update({
+        face: null,
+        pose: {
+          spine: { pitch: 1, yaw: 0, roll: 0 },
+          leftArm: { shoulder: { x: 0, y: 0, z: 0 }, elbow: { x: 0, y: 0, z: 0 } },
+          rightArm: { shoulder: { x: 0, y: 0, z: 0 }, elbow: { x: 0, y: 0, z: 0 } },
+        },
+        leftHand: null, rightHand: null,
+      })
+
+      // Spine uses global smoothing: responsiveness = 0.2
+      // pitch = 0 + 0.2 * (1 - 0) = 0.2
+      const spineCall = mockRotationSet.mock.calls[0]
+      expect(spineCall[0]).toBeCloseTo(0.2, 1)
+    })
+
+    it('should preserve fast-response behavior after setSmoothing()', () => {
+      bridge = new TrackingBridge(mockVrm, { smoothing: 0.5 })
+
+      // Frame 1: initialize
+      bridge.update({
+        face: {
+          head: { pitch: 0, yaw: 0, roll: 0 },
+          eyes: { leftBlink: 0, rightBlink: 0, gazeX: 0, gazeY: 0 },
+          mouth: { open: 0, smile: 0 },
+        },
+        pose: null, leftHand: null, rightHand: null,
+      })
+
+      // Change smoothing (clears all filters)
+      bridge.setSmoothing(0.9)
+
+      // Frame 2: after reset, blink should still use fast responsiveness
+      bridge.update({
+        face: {
+          head: { pitch: 0, yaw: 0, roll: 0 },
+          eyes: { leftBlink: 0, rightBlink: 0, gazeX: 0, gazeY: 0 },
+          mouth: { open: 0, smile: 0 },
+        },
+        pose: null, leftHand: null, rightHand: null,
+      })
+
+      // Frame 3: blink jumps
+      bridge.update({
+        face: {
+          head: { pitch: 0, yaw: 0, roll: 0 },
+          eyes: { leftBlink: 1, rightBlink: 1, gazeX: 0, gazeY: 0 },
+          mouth: { open: 0, smile: 0 },
+        },
+        pose: null, leftHand: null, rightHand: null,
+      })
+
+      // Fast responsiveness (0.9) should still apply, not global (1-0.9=0.1)
+      const setValue = mockVrm.expressionManager!.setValue as ReturnType<typeof vi.fn>
+      const blinkCalls = setValue.mock.calls.filter((c: unknown[]) => c[0] === 'blinkLeft')
+      const lastBlink = blinkCalls[blinkCalls.length - 1][1] as number
+      expect(lastBlink).toBeCloseTo(0.9, 1)
+    })
+  })
+
   it('should update feature toggles dynamically', () => {
     // Start with all enabled
     bridge = new TrackingBridge(mockVrm, {
