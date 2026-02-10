@@ -40,8 +40,9 @@ export interface MediaPipeTrackerOptions {
   needsHands?: boolean
 }
 
+const MEDIAPIPE_VERSION = '0.10.32'
 const DEFAULT_WASM_BASE_PATH =
-  'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
+  `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}/wasm`
 
 export class MediaPipeTracker {
   private holisticLandmarker: HolisticLandmarker | null = null
@@ -79,7 +80,7 @@ export class MediaPipeTracker {
       this.holisticLandmarker = await HolisticLandmarker.createFromOptions(vision, {
         baseOptions: {
           modelAssetPath:
-            'https://storage.googleapis.com/mediapipe-models/holistic_landmarker/holistic_landmarker/float16/latest/holistic_landmarker.task',
+            'https://storage.googleapis.com/mediapipe-models/holistic_landmarker/holistic_landmarker/float16/1/holistic_landmarker.task',
           delegate: 'GPU',
         },
         runningMode: 'VIDEO',
