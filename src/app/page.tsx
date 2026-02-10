@@ -16,11 +16,17 @@ import { useVRMTracking } from '../hooks/use-vrm-tracking'
 import { useSettingsStore } from '../stores/settings-store'
 import { useTrackingStore } from '../stores/tracking-store'
 import { checkBrowserSupport } from '../lib/compat/browser-support'
+import { listVRMs, deleteVRM as deleteVRMFromDB, updateThumbnail } from '../lib/vrm/vrm-storage'
+import { captureThumbnail } from '../lib/vrm/vrm-thumbnail'
+import type { VRMMeta } from '../lib/vrm/vrm-storage'
 
 function HomePageContent() {
   const browserSupport = useMemo(() => checkBrowserSupport(), [])
-  const { vrm, loading: vrmLoading, loadFromFile } = useVRMLoader()
+  const { vrm, loading: vrmLoading, loadFromFile, loadFromStorage, lastSavedId } = useVRMLoader()
   const settings = useSettingsStore()
+  const [storedVRMs, setStoredVRMs] = useState<VRMMeta[]>([])
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const thumbnailCapturedRef = useRef(false)
   const { stream } = useCamera()
   const debugEnabled = useTrackingStore((s) => s.debugEnabled)
   const setDebugEnabled = useTrackingStore((s) => s.setDebugEnabled)
@@ -80,6 +86,81 @@ function HomePageContent() {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [settings, debugEnabled, setDebugEnabled])
+
+  // Refresh stored VRMs list
+  const refreshStoredVRMs = useCallback(() => {
+    listVRMs()
+      .then(setStoredVRMs)
+      .catch(console.warn)
+  }, [])
+
+  // Auto-load last used VRM on mount
+  useEffect(() => {
+    const lastVrmId = settings.lastVrmId
+    if (lastVrmId != null) {
+      loadFromStorage(lastVrmId).catch(() => {
+        // VRM missing or corrupted — clear and fall back to import UI
+        settings.setLastVrmId(null)
+      })
+    }
+    refreshStoredVRMs()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // Only run on mount
+
+  // Update lastVrmId and refresh gallery after a save
+  useEffect(() => {
+    if (lastSavedId != null) {
+      settings.setLastVrmId(lastSavedId)
+      refreshStoredVRMs()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastSavedId])
+
+  // Capture thumbnail after VRM loads (once per VRM load)
+  useEffect(() => {
+    if (vrm && lastSavedId != null && !thumbnailCapturedRef.current) {
+      thumbnailCapturedRef.current = true
+      // Wait a frame for the VRM to render
+      requestAnimationFrame(() => {
+        const canvas = canvasRef.current ?? document.querySelector('canvas')
+        if (canvas) {
+          captureThumbnail(canvas)
+            .then((blob) => updateThumbnail(lastSavedId, blob))
+            .then(refreshStoredVRMs)
+            .catch(console.warn)
+        }
+      })
+    }
+    if (!vrm) {
+      thumbnailCapturedRef.current = false
+    }
+  }, [vrm, lastSavedId, refreshStoredVRMs])
+
+  // Handle gallery VRM selection
+  const handleVRMSelect = useCallback(
+    (id: number) => {
+      thumbnailCapturedRef.current = false
+      loadFromStorage(id)
+        .then(() => settings.setLastVrmId(id))
+        .catch(console.warn)
+    },
+    [loadFromStorage, settings]
+  )
+
+  // Handle gallery VRM deletion
+  const handleVRMDelete = useCallback(
+    (id: number) => {
+      deleteVRMFromDB(id)
+        .then(() => {
+          if (settings.lastVrmId === id) {
+            settings.setLastVrmId(null)
+          }
+          refreshStoredVRMs()
+        })
+        .catch(console.warn)
+    },
+    [settings, refreshStoredVRMs]
+  )
 
   // Get stable setter references from the store
   const {
@@ -196,6 +277,10 @@ function HomePageContent() {
               onDrawingFpsChange={settings.setDrawingFps}
               onVRMImport={loadFromFile}
               vrmLoading={vrmLoading}
+              storedVRMs={storedVRMs}
+              activeVrmId={settings.lastVrmId}
+              onVRMSelect={handleVRMSelect}
+              onVRMDelete={handleVRMDelete}
             />
 
             {/* Camera Controls */}

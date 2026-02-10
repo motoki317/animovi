@@ -7,6 +7,7 @@ import { useState, useCallback, useRef } from 'react'
 import type { VRM } from '@pixiv/three-vrm'
 import { VRMLoaderPlugin } from '@pixiv/three-vrm'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { saveVRM, loadVRM as loadVRMFromDB, updateLastUsed } from '../lib/vrm/vrm-storage'
 
 export interface UseVRMLoaderResult {
   vrm: VRM | null
@@ -15,6 +16,9 @@ export interface UseVRMLoaderResult {
   progress: number
   loadFromUrl: (url: string) => Promise<void>
   loadFromFile: (file: File) => Promise<void>
+  loadFromStorage: (id: number) => Promise<void>
+  /** The last saved VRM ID (set after successful file import) */
+  lastSavedId: number | null
 }
 
 export function useVRMLoader(): UseVRMLoaderResult {
@@ -22,6 +26,7 @@ export function useVRMLoader(): UseVRMLoaderResult {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<Error | null>(null)
   const [progress, setProgress] = useState(0)
+  const [lastSavedId, setLastSavedId] = useState<number | null>(null)
   const loaderRef = useRef<GLTFLoader | null>(null)
 
   // Get or create the loader (singleton per hook instance)
@@ -143,8 +148,43 @@ export function useVRMLoader(): UseVRMLoaderResult {
       setError(null)
       setProgress(0)
 
-      const objectUrl = URL.createObjectURL(file)
-      return loadVRM(objectUrl, objectUrl)
+      // Read ArrayBuffer for persistence before loading
+      const arrayBuffer = await file.arrayBuffer()
+      const blob = new Blob([arrayBuffer])
+      const objectUrl = URL.createObjectURL(blob)
+      await loadVRM(objectUrl, objectUrl)
+
+      // Persist to IndexedDB (fire-and-forget, don't block rendering)
+      // Thumbnail placeholder — real thumbnail captured by page.tsx after first render
+      const placeholderThumb = new Blob([], { type: 'image/jpeg' })
+      saveVRM(arrayBuffer, placeholderThumb, file.name, file.size)
+        .then((id) => setLastSavedId(id))
+        .catch(console.warn)
+    },
+    [loadVRM]
+  )
+
+  const loadFromStorage = useCallback(
+    async (id: number): Promise<void> => {
+      setLoading(true)
+      setError(null)
+      setProgress(0)
+
+      const stored = await loadVRMFromDB(id)
+      if (!stored) {
+        const err = new Error('VRM not found in storage')
+        setError(err)
+        setLoading(false)
+        throw err
+      }
+
+      const blob = new Blob([stored.data])
+      const objectUrl = URL.createObjectURL(blob)
+      await loadVRM(objectUrl, objectUrl)
+
+      // Update last-used timestamp (fire-and-forget)
+      updateLastUsed(id).catch(console.warn)
+      setLastSavedId(id)
     },
     [loadVRM]
   )
@@ -156,5 +196,7 @@ export function useVRMLoader(): UseVRMLoaderResult {
     progress,
     loadFromUrl,
     loadFromFile,
+    loadFromStorage,
+    lastSavedId,
   }
 }

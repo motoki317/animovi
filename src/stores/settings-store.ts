@@ -30,6 +30,9 @@ interface SettingsState {
   // Panel visibility
   panelVisible: boolean
 
+  // VRM persistence
+  lastVrmId: number | null
+
   // Actions - Tracking
   setSmoothing: (value: number) => void
   setFaceTrackingEnabled: (enabled: boolean) => void
@@ -53,6 +56,9 @@ interface SettingsState {
   // Actions - Panel
   setPanelVisible: (visible: boolean) => void
   togglePanel: () => void
+
+  // Actions - VRM persistence
+  setLastVrmId: (id: number | null) => void
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -81,6 +87,9 @@ export const useSettingsStore = create<SettingsState>()(
       // Panel defaults
       panelVisible: true,
 
+      // VRM persistence defaults
+      lastVrmId: null,
+
       // Tracking actions
       setSmoothing: (smoothing) => set({ smoothing }),
       setFaceTrackingEnabled: (faceTrackingEnabled) => set({ faceTrackingEnabled }),
@@ -104,6 +113,9 @@ export const useSettingsStore = create<SettingsState>()(
       // Panel actions
       setPanelVisible: (panelVisible) => set({ panelVisible }),
       togglePanel: () => set((state) => ({ panelVisible: !state.panelVisible })),
+
+      // VRM persistence actions
+      setLastVrmId: (lastVrmId) => set({ lastVrmId }),
     }),
     {
       name: 'animovi-settings',

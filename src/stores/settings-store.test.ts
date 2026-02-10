@@ -34,6 +34,7 @@ describe('useSettingsStore', () => {
       panelVisible: true,
       trackingFps: 30,
       drawingFps: 60,
+      lastVrmId: null,
     })
   })
 
@@ -104,5 +105,20 @@ describe('useSettingsStore', () => {
   it('should update drawing FPS', () => {
     useSettingsStore.getState().setDrawingFps(30)
     expect(useSettingsStore.getState().drawingFps).toBe(30)
+  })
+
+  it('should initialize lastVrmId as null', () => {
+    expect(useSettingsStore.getState().lastVrmId).toBeNull()
+  })
+
+  it('should update lastVrmId', () => {
+    useSettingsStore.getState().setLastVrmId(42)
+    expect(useSettingsStore.getState().lastVrmId).toBe(42)
+  })
+
+  it('should clear lastVrmId to null', () => {
+    useSettingsStore.getState().setLastVrmId(42)
+    useSettingsStore.getState().setLastVrmId(null)
+    expect(useSettingsStore.getState().lastVrmId).toBeNull()
   })
 })

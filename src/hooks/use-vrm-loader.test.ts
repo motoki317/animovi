@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { useVRMLoader } from './use-vrm-loader'
+import type { StoredVRM } from '../lib/vrm/vrm-storage'
 
 // Mock VRM instance
 const createMockVRM = () => ({
@@ -29,6 +30,17 @@ vi.mock('three', () => ({
 
 vi.mock('@pixiv/three-vrm', () => ({
   VRMLoaderPlugin: vi.fn(),
+}))
+
+// Mock VRM storage
+const mockSaveVRM = vi.fn().mockResolvedValue(1)
+const mockLoadVRMFromDB = vi.fn().mockResolvedValue(null)
+const mockUpdateLastUsed = vi.fn().mockResolvedValue(undefined)
+
+vi.mock('../lib/vrm/vrm-storage', () => ({
+  saveVRM: (...args: unknown[]) => mockSaveVRM(...args),
+  loadVRM: (...args: unknown[]) => mockLoadVRMFromDB(...args),
+  updateLastUsed: (...args: unknown[]) => mockUpdateLastUsed(...args),
 }))
 
 vi.mock('three/addons/loaders/GLTFLoader.js', () => ({
@@ -102,12 +114,13 @@ describe('useVRMLoader', () => {
     const mockFile = new File(['vrm-content'], 'avatar.vrm', {
       type: 'model/gltf-binary',
     })
+    mockFile.arrayBuffer = vi.fn().mockResolvedValue(new ArrayBuffer(8))
 
     await act(async () => {
       await result.current.loadFromFile(mockFile)
     })
 
-    expect(URL.createObjectURL).toHaveBeenCalledWith(mockFile)
+    expect(URL.createObjectURL).toHaveBeenCalled()
     expect(result.current.vrm).toBe(mockVRM)
     expect(URL.revokeObjectURL).toHaveBeenCalledWith(mockObjectURL)
   })
@@ -196,6 +209,91 @@ describe('useVRMLoader', () => {
     expect(result.current.error).not.toBeNull()
     expect(result.current.error?.message).toContain('VRM')
     expect(result.current.vrm).toBeNull()
+  })
+
+  describe('loadFromFile persistence', () => {
+    it('should persist ArrayBuffer to IndexedDB after file load', async () => {
+      const mockVRM = createMockVRM()
+      mockSaveVRM.mockResolvedValue(42)
+
+      vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:http://localhost/mock-url')
+      vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+
+      mockGLTFLoad.mockImplementation((_url, onLoad) => {
+        onLoad({ userData: { vrm: mockVRM } })
+      })
+
+      const { result } = renderHook(() => useVRMLoader())
+      const mockBuffer = new ArrayBuffer(8)
+      const mockFile = new File(['vrm-data'], 'avatar.vrm', { type: 'model/gltf-binary' })
+      // jsdom File doesn't implement arrayBuffer(), so we add it
+      mockFile.arrayBuffer = vi.fn().mockResolvedValue(mockBuffer)
+
+      await act(async () => {
+        await result.current.loadFromFile(mockFile)
+      })
+
+      // Wait for async fire-and-forget save
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0))
+      })
+
+      expect(mockSaveVRM).toHaveBeenCalledWith(
+        expect.any(ArrayBuffer),
+        expect.any(Blob),
+        'avatar.vrm',
+        mockFile.size
+      )
+      expect(result.current.lastSavedId).toBe(42)
+    })
+  })
+
+  describe('loadFromStorage', () => {
+    it('should load VRM from IndexedDB by ID', async () => {
+      const mockVRM = createMockVRM()
+      const stored: StoredVRM = {
+        id: 5,
+        data: new ArrayBuffer(100),
+        thumbnail: new Blob([], { type: 'image/jpeg' }),
+        name: 'stored.vrm',
+        size: 100,
+        createdAt: Date.now(),
+        lastUsedAt: Date.now(),
+      }
+      mockLoadVRMFromDB.mockResolvedValue(stored)
+
+      vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:http://localhost/stored-url')
+      vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+
+      mockGLTFLoad.mockImplementation((_url, onLoad) => {
+        onLoad({ userData: { vrm: mockVRM } })
+      })
+
+      const { result } = renderHook(() => useVRMLoader())
+
+      await act(async () => {
+        await result.current.loadFromStorage(5)
+      })
+
+      expect(mockLoadVRMFromDB).toHaveBeenCalledWith(5)
+      expect(result.current.vrm).toBe(mockVRM)
+      expect(mockUpdateLastUsed).toHaveBeenCalledWith(5)
+      expect(result.current.lastSavedId).toBe(5)
+    })
+
+    it('should set error when VRM not found in storage', async () => {
+      mockLoadVRMFromDB.mockResolvedValue(null)
+
+      const { result } = renderHook(() => useVRMLoader())
+
+      await act(async () => {
+        await result.current.loadFromStorage(999).catch(() => {})
+      })
+
+      expect(result.current.error).not.toBeNull()
+      expect(result.current.error?.message).toBe('VRM not found in storage')
+      expect(result.current.loading).toBe(false)
+    })
   })
 
   it('should set loading true during load operation', async () => {

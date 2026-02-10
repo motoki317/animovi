@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { SettingsPanel, type SettingsPanelProps } from './settings-panel'
+import type { VRMMeta } from '../lib/vrm/vrm-storage'
 
 describe('SettingsPanel', () => {
   const defaultProps: SettingsPanelProps = {
@@ -107,5 +108,103 @@ describe('SettingsPanel', () => {
     fireEvent.change(slider, { target: { value: '30' } })
 
     expect(onDrawingFpsChange).toHaveBeenCalledWith(30)
+  })
+
+  describe('VRM Gallery', () => {
+    const mockVRMs: VRMMeta[] = [
+      { id: 1, name: 'avatar-a.vrm', size: 1000, createdAt: 1000, lastUsedAt: 2000, thumbnail: new Blob([], { type: 'image/jpeg' }) },
+      { id: 2, name: 'avatar-b.vrm', size: 2000, createdAt: 1100, lastUsedAt: 2100, thumbnail: new Blob([], { type: 'image/jpeg' }) },
+    ]
+
+    it('should render gallery when storedVRMs provided', () => {
+      const onVRMImport = vi.fn()
+      render(
+        <SettingsPanel
+          {...defaultProps}
+          onVRMImport={onVRMImport}
+          storedVRMs={mockVRMs}
+          activeVrmId={1}
+        />
+      )
+
+      expect(screen.getByTestId('vrm-gallery')).toBeDefined()
+      expect(screen.getByTestId('vrm-gallery-item-1')).toBeDefined()
+      expect(screen.getByTestId('vrm-gallery-item-2')).toBeDefined()
+    })
+
+    it('should not render gallery when storedVRMs is empty', () => {
+      const onVRMImport = vi.fn()
+      render(
+        <SettingsPanel
+          {...defaultProps}
+          onVRMImport={onVRMImport}
+          storedVRMs={[]}
+        />
+      )
+
+      expect(screen.queryByTestId('vrm-gallery')).toBeNull()
+    })
+
+    it('should call onVRMSelect when thumbnail clicked', () => {
+      const onVRMImport = vi.fn()
+      const onVRMSelect = vi.fn()
+      render(
+        <SettingsPanel
+          {...defaultProps}
+          onVRMImport={onVRMImport}
+          storedVRMs={mockVRMs}
+          onVRMSelect={onVRMSelect}
+        />
+      )
+
+      fireEvent.click(screen.getByTestId('vrm-gallery-item-2'))
+      expect(onVRMSelect).toHaveBeenCalledWith(2)
+    })
+
+    it('should call onVRMDelete when delete button clicked', () => {
+      const onVRMImport = vi.fn()
+      const onVRMDelete = vi.fn()
+      render(
+        <SettingsPanel
+          {...defaultProps}
+          onVRMImport={onVRMImport}
+          storedVRMs={mockVRMs}
+          onVRMDelete={onVRMDelete}
+        />
+      )
+
+      fireEvent.click(screen.getByTestId('vrm-delete-1'))
+      expect(onVRMDelete).toHaveBeenCalledWith(1)
+    })
+
+    it('should highlight active VRM', () => {
+      const onVRMImport = vi.fn()
+      render(
+        <SettingsPanel
+          {...defaultProps}
+          onVRMImport={onVRMImport}
+          storedVRMs={mockVRMs}
+          activeVrmId={2}
+        />
+      )
+
+      const item2 = screen.getByTestId('vrm-gallery-item-2')
+      // jsdom normalizes hex to rgb
+      expect(item2.style.borderColor).toBe('rgb(79, 195, 247)')
+    })
+
+    it('should keep import button alongside gallery', () => {
+      const onVRMImport = vi.fn()
+      render(
+        <SettingsPanel
+          {...defaultProps}
+          onVRMImport={onVRMImport}
+          storedVRMs={mockVRMs}
+        />
+      )
+
+      expect(screen.getByTestId('import-vrm-button')).toBeDefined()
+      expect(screen.getByTestId('vrm-gallery')).toBeDefined()
+    })
   })
 })
