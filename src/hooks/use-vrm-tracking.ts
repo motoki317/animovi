@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import type { VRM } from '@pixiv/three-vrm'
-import { MediaPipeTracker } from '../lib/mediapipe/tracker'
+import { MediaPipeTracker, type TrackerResult } from '../lib/mediapipe/tracker'
 import { TrackingBridge } from '../lib/vrm/tracking-bridge'
 import { solveHolistic, type HolisticResult } from '../lib/solver/holistic-solver'
 import { isVideoReady, waitForVideoReady } from '../lib/capture/video-readiness'
@@ -86,7 +86,7 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
   // Helper to emit debug data - reads debugEnabled fresh from store to avoid stale closure
   const emitDebugData = useCallback((
     pipelineState: PipelineState,
-    mediaPipeResult: ReturnType<MediaPipeTracker['detectLandmarks']> | null,
+    mediaPipeResult: TrackerResult | null,
     solved: HolisticResult | null,
     elapsed: number,
     timestamp: number,
@@ -157,8 +157,11 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
       emitDebugData('initializing', null, null, 0, Date.now(), 'Initializing MediaPipe...')
 
       try {
-        // Create tracker (can initialize while waiting for video)
-        const tracker = new MediaPipeTracker()
+        // Create tracker - use lightweight FaceLandmarker when pose/hand tracking not needed
+        const tracker = new MediaPipeTracker({
+          needsPose: poseTracking,
+          needsHands: handTracking,
+        })
         await tracker.initialize()
 
         if (cancelled) {
@@ -167,7 +170,8 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
         }
 
         trackerRef.current = tracker
-        emitDebugData('initializing', null, null, 0, Date.now(), 'MediaPipe ready, creating bridge...')
+        console.log(`[perf] MediaPipe model: ${tracker.mode}`)
+        emitDebugData('initializing', null, null, 0, Date.now(), `MediaPipe ready (${tracker.mode} mode), creating bridge...`)
 
         // Create bridge (vrm is guaranteed non-null here due to guard at start of effect)
         // Read from refs to get post-hydration values (Zustand persist may have
@@ -228,7 +232,8 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
   // Note: stream is used as a trigger to re-run when camera becomes available
   // videoRef.current is checked in effect body
   // emitDebugData has stable reference (empty deps) so won't cause re-runs
-  }, [enabled, vrm, stream, emitDebugData])
+  // poseTracking/handTracking trigger re-init to switch between FaceLandmarker and HolisticLandmarker
+  }, [enabled, vrm, stream, poseTracking, handTracking, emitDebugData])
 
   // Update bridge options when settings change
   useEffect(() => {

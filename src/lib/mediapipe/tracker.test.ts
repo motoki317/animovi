@@ -3,21 +3,30 @@ import { MediaPipeTracker, MediaPipeTrackerOptions } from './tracker'
 
 // Create hoisted mocks that can be accessed inside vi.mock
 const mocks = vi.hoisted(() => ({
-  detectForVideo: vi.fn(),
-  setOptions: vi.fn(),
-  close: vi.fn(),
-  createFromOptions: vi.fn(),
+  holisticDetectForVideo: vi.fn(),
+  holisticSetOptions: vi.fn(),
+  holisticClose: vi.fn(),
+  holisticCreateFromOptions: vi.fn(),
+  faceDetectForVideo: vi.fn(),
+  faceClose: vi.fn(),
+  faceCreateFromOptions: vi.fn(),
   forVisionTasks: vi.fn(),
 }))
 
 vi.mock('@mediapipe/tasks-vision', () => {
-  const createMockLandmarker = () => ({
-    detectForVideo: mocks.detectForVideo,
-    setOptions: mocks.setOptions,
-    close: mocks.close,
+  const createMockHolisticLandmarker = () => ({
+    detectForVideo: mocks.holisticDetectForVideo,
+    setOptions: mocks.holisticSetOptions,
+    close: mocks.holisticClose,
   })
 
-  mocks.createFromOptions.mockResolvedValue(createMockLandmarker())
+  const createMockFaceLandmarker = () => ({
+    detectForVideo: mocks.faceDetectForVideo,
+    close: mocks.faceClose,
+  })
+
+  mocks.holisticCreateFromOptions.mockResolvedValue(createMockHolisticLandmarker())
+  mocks.faceCreateFromOptions.mockResolvedValue(createMockFaceLandmarker())
   mocks.forVisionTasks.mockResolvedValue({
     wasmLoaderPath: '/mock/wasm-loader.js',
     wasmBinaryPath: '/mock/wasm.wasm',
@@ -28,9 +37,10 @@ vi.mock('@mediapipe/tasks-vision', () => {
       forVisionTasks: mocks.forVisionTasks,
     },
     HolisticLandmarker: {
-      createFromOptions: mocks.createFromOptions,
+      createFromOptions: mocks.holisticCreateFromOptions,
     },
     FaceLandmarker: {
+      createFromOptions: mocks.faceCreateFromOptions,
       FACE_LANDMARKS_TESSELATION: [],
     },
     PoseLandmarker: {
@@ -47,11 +57,14 @@ describe('MediaPipeTracker', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    // Re-setup the mock resolved values after clearing
-    mocks.createFromOptions.mockResolvedValue({
-      detectForVideo: mocks.detectForVideo,
-      setOptions: mocks.setOptions,
-      close: mocks.close,
+    mocks.holisticCreateFromOptions.mockResolvedValue({
+      detectForVideo: mocks.holisticDetectForVideo,
+      setOptions: mocks.holisticSetOptions,
+      close: mocks.holisticClose,
+    })
+    mocks.faceCreateFromOptions.mockResolvedValue({
+      detectForVideo: mocks.faceDetectForVideo,
+      close: mocks.faceClose,
     })
     mocks.forVisionTasks.mockResolvedValue({
       wasmLoaderPath: '/mock/wasm-loader.js',
@@ -64,46 +77,144 @@ describe('MediaPipeTracker', () => {
     await tracker.dispose()
   })
 
-  it('should initialize HolisticLandmarker', async () => {
-    await tracker.initialize()
+  describe('Model selection', () => {
+    it('should use FaceLandmarker by default (no pose/hand needed)', async () => {
+      await tracker.initialize()
 
-    expect(mocks.forVisionTasks).toHaveBeenCalled()
-    expect(mocks.createFromOptions).toHaveBeenCalled()
-  })
-
-  it('should detect landmarks from video frame', async () => {
-    const mockResults = {
-      faceLandmarks: [[{ x: 0.5, y: 0.5, z: 0 }]],
-      poseLandmarks: [[{ x: 0.5, y: 0.5, z: 0 }]],
-      leftHandLandmarks: [[{ x: 0.5, y: 0.5, z: 0 }]],
-      rightHandLandmarks: [[{ x: 0.5, y: 0.5, z: 0 }]],
-    }
-    mocks.detectForVideo.mockReturnValue(mockResults)
-
-    await tracker.initialize()
-
-    const mockVideoFrame = {
-      width: 640,
-      height: 480,
-    } as HTMLVideoElement
-
-    const results = tracker.detectLandmarks(mockVideoFrame, 1000)
-
-    expect(mocks.detectForVideo).toHaveBeenCalledWith(mockVideoFrame, 1000)
-    expect(results).toBe(mockResults)
-  })
-
-  it('should handle detection errors gracefully', async () => {
-    mocks.detectForVideo.mockImplementation(() => {
-      throw new Error('Detection failed')
+      expect(mocks.forVisionTasks).toHaveBeenCalled()
+      expect(mocks.faceCreateFromOptions).toHaveBeenCalled()
+      expect(mocks.holisticCreateFromOptions).not.toHaveBeenCalled()
+      expect(tracker.mode).toBe('face')
     })
 
-    await tracker.initialize()
+    it('should use HolisticLandmarker when pose tracking is needed', async () => {
+      tracker = new MediaPipeTracker({ needsPose: true })
+      await tracker.initialize()
 
-    const mockVideoFrame = {} as HTMLVideoElement
-    const results = tracker.detectLandmarks(mockVideoFrame, 1000)
+      expect(mocks.holisticCreateFromOptions).toHaveBeenCalled()
+      expect(mocks.faceCreateFromOptions).not.toHaveBeenCalled()
+      expect(tracker.mode).toBe('holistic')
+    })
 
-    expect(results).toBeNull()
+    it('should use HolisticLandmarker when hand tracking is needed', async () => {
+      tracker = new MediaPipeTracker({ needsHands: true })
+      await tracker.initialize()
+
+      expect(mocks.holisticCreateFromOptions).toHaveBeenCalled()
+      expect(mocks.faceCreateFromOptions).not.toHaveBeenCalled()
+      expect(tracker.mode).toBe('holistic')
+    })
+  })
+
+  describe('FaceLandmarker mode', () => {
+    it('should detect face landmarks and return unified result', async () => {
+      const mockFaceResult = {
+        faceLandmarks: [[{ x: 0.5, y: 0.5, z: 0 }]],
+        faceBlendshapes: [],
+        facialTransformationMatrixes: [],
+      }
+      mocks.faceDetectForVideo.mockReturnValue(mockFaceResult)
+
+      await tracker.initialize()
+
+      const mockVideoFrame = { width: 640, height: 480 } as HTMLVideoElement
+      const results = tracker.detectLandmarks(mockVideoFrame, 1000)
+
+      expect(mocks.faceDetectForVideo).toHaveBeenCalledWith(mockVideoFrame, 1000)
+      expect(results).toEqual({
+        faceLandmarks: [[{ x: 0.5, y: 0.5, z: 0 }]],
+        poseLandmarks: [],
+        leftHandLandmarks: [],
+        rightHandLandmarks: [],
+      })
+    })
+
+    it('should handle detection errors gracefully', async () => {
+      mocks.faceDetectForVideo.mockImplementation(() => {
+        throw new Error('Detection failed')
+      })
+
+      await tracker.initialize()
+
+      const mockVideoFrame = {} as HTMLVideoElement
+      const results = tracker.detectLandmarks(mockVideoFrame, 1000)
+
+      expect(results).toBeNull()
+    })
+
+    it('should clean up on dispose', async () => {
+      await tracker.initialize()
+      await tracker.dispose()
+
+      expect(mocks.faceClose).toHaveBeenCalled()
+    })
+  })
+
+  describe('HolisticLandmarker mode', () => {
+    it('should detect all landmarks', async () => {
+      const mockResults = {
+        faceLandmarks: [[{ x: 0.5, y: 0.5, z: 0 }]],
+        poseLandmarks: [[{ x: 0.5, y: 0.5, z: 0 }]],
+        leftHandLandmarks: [[{ x: 0.5, y: 0.5, z: 0 }]],
+        rightHandLandmarks: [[{ x: 0.5, y: 0.5, z: 0 }]],
+      }
+      mocks.holisticDetectForVideo.mockReturnValue(mockResults)
+
+      tracker = new MediaPipeTracker({ needsPose: true })
+      await tracker.initialize()
+
+      const mockVideoFrame = { width: 640, height: 480 } as HTMLVideoElement
+      const results = tracker.detectLandmarks(mockVideoFrame, 1000)
+
+      expect(mocks.holisticDetectForVideo).toHaveBeenCalledWith(mockVideoFrame, 1000)
+      expect(results).toBe(mockResults)
+    })
+
+    it('should handle detection errors gracefully', async () => {
+      mocks.holisticDetectForVideo.mockImplementation(() => {
+        throw new Error('Detection failed')
+      })
+
+      tracker = new MediaPipeTracker({ needsPose: true })
+      await tracker.initialize()
+
+      const mockVideoFrame = {} as HTMLVideoElement
+      const results = tracker.detectLandmarks(mockVideoFrame, 1000)
+
+      expect(results).toBeNull()
+    })
+
+    it('should clean up on dispose', async () => {
+      tracker = new MediaPipeTracker({ needsPose: true })
+      await tracker.initialize()
+      await tracker.dispose()
+
+      expect(mocks.holisticClose).toHaveBeenCalled()
+    })
+
+    it('should support custom options', async () => {
+      const options: MediaPipeTrackerOptions = {
+        numFaces: 2,
+        numHands: 4,
+        numPoses: 2,
+        minFaceDetectionConfidence: 0.7,
+        minPoseDetectionConfidence: 0.7,
+        minHandDetectionConfidence: 0.7,
+        needsPose: true,
+      }
+
+      tracker = new MediaPipeTracker(options)
+      await tracker.initialize()
+
+      expect(mocks.holisticCreateFromOptions).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          minFaceDetectionConfidence: 0.7,
+          minPoseDetectionConfidence: 0.7,
+          minHandLandmarksConfidence: 0.7,
+        })
+      )
+    })
   })
 
   it('should return null if not initialized', () => {
@@ -111,37 +222,8 @@ describe('MediaPipeTracker', () => {
     const results = tracker.detectLandmarks(mockVideoFrame, 1000)
 
     expect(results).toBeNull()
-    expect(mocks.detectForVideo).not.toHaveBeenCalled()
-  })
-
-  it('should clean up resources on dispose', async () => {
-    await tracker.initialize()
-    await tracker.dispose()
-
-    expect(mocks.close).toHaveBeenCalled()
-  })
-
-  it('should support custom options', async () => {
-    const options: MediaPipeTrackerOptions = {
-      numFaces: 2,
-      numHands: 4,
-      numPoses: 2,
-      minFaceDetectionConfidence: 0.7,
-      minPoseDetectionConfidence: 0.7,
-      minHandDetectionConfidence: 0.7,
-    }
-
-    tracker = new MediaPipeTracker(options)
-    await tracker.initialize()
-
-    expect(mocks.createFromOptions).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        minFaceDetectionConfidence: 0.7,
-        minPoseDetectionConfidence: 0.7,
-        minHandLandmarksConfidence: 0.7,
-      })
-    )
+    expect(mocks.holisticDetectForVideo).not.toHaveBeenCalled()
+    expect(mocks.faceDetectForVideo).not.toHaveBeenCalled()
   })
 
   it('should report initialization status', async () => {
