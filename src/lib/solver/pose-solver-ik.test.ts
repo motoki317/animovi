@@ -36,40 +36,45 @@ function distance(a: Vector3, b: Vector3): number {
   return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2)
 }
 
-/** Convert MediaPipe coords to VRM space (same as pose-solver) */
+/** Convert MediaPipe coords to VRM space (matches production pose-solver.ts) */
 function toVRMSpace(p: { x: number; y: number; z: number }): Vector3 {
-  return { x: p.x, y: -p.y, z: p.z }
+  return {
+    x: -(p.x - 0.5),
+    y: -p.y,
+    z: p.z,
+  }
 }
 
 /**
- * Apply Euler rotation (XYZ order) to a vector
+ * Apply ZYX Euler rotation to a vector.
+ * ZYX intrinsic: apply X first, then Y, then Z. Matrix: Rz * Ry * Rx
+ * Matches Three.js Euler order 'ZYX'.
  */
-function applyEulerXYZ(v: Vector3, rx: number, ry: number, rz: number): Vector3 {
+function applyEulerZYX(v: Vector3, rx: number, ry: number, rz: number): Vector3 {
   const cosX = Math.cos(rx), sinX = Math.sin(rx)
   const cosY = Math.cos(ry), sinY = Math.sin(ry)
   const cosZ = Math.cos(rz), sinZ = Math.sin(rz)
 
-  // Rx
-  let y1 = v.y * cosX - v.z * sinX
-  let z1 = v.y * sinX + v.z * cosX
-  let x1 = v.x
+  const x1 = v.x
+  const y1 = v.y * cosX - v.z * sinX
+  const z1 = v.y * sinX + v.z * cosX
 
-  // Ry
-  let x2 = x1 * cosY + z1 * sinY
-  let z2 = -x1 * sinY + z1 * cosY
-  let y2 = y1
+  const x2 = x1 * cosY + z1 * sinY
+  const y2 = y1
+  const z2 = -x1 * sinY + z1 * cosY
 
-  // Rz
-  let x3 = x2 * cosZ - y2 * sinZ
-  let y3 = x2 * sinZ + y2 * cosZ
-  let z3 = z2
+  const x3 = x2 * cosZ - y2 * sinZ
+  const y3 = x2 * sinZ + y2 * cosZ
 
-  return { x: x3, y: y3, z: z3 }
+  return { x: x3, y: y3, z: z2 }
 }
 
 /**
- * Forward Kinematics: Apply computed rotations and return wrist position.
- * This verifies that the IK solution actually places the wrist at the target.
+ * Forward Kinematics: Apply computed rotations using the bone hierarchy
+ * and return wrist position.
+ *
+ * Bone hierarchy: worldDir = R_shoulder * R_elbow * tposeDir
+ * This matches how Three.js applies parent * child rotations.
  */
 function computeWristPositionFK(
   shoulderPos: Vector3,
@@ -79,11 +84,10 @@ function computeWristPositionFK(
   lowerArmLen: number,
   isLeft: boolean
 ): Vector3 {
-  // T-pose arm direction in VRM space
   const tposeDir: Vector3 = isLeft ? { x: -1, y: 0, z: 0 } : { x: 1, y: 0, z: 0 }
 
-  // Apply shoulder rotation to get upper arm direction
-  const upperArmDir = applyEulerXYZ(tposeDir, shoulderRot.x, shoulderRot.y, shoulderRot.z)
+  // Upper arm direction: R_shoulder * tposeDir
+  const upperArmDir = applyEulerZYX(tposeDir, shoulderRot.x, shoulderRot.y, shoulderRot.z)
 
   // Elbow position
   const elbowPos: Vector3 = {
@@ -92,48 +96,11 @@ function computeWristPositionFK(
     z: shoulderPos.z + upperArmDir.z * upperArmLen,
   }
 
-  // Lower arm direction (initially same as upper arm, then bent)
-  // Elbow bend is rotation around the local X-axis (perpendicular to arm)
-  // For simplicity, we rotate in the plane defined by upper arm and down vector
-  const elbowBend = elbowRot.x // negative = flexion
-
-  let lowerArmDir: Vector3
-  if (Math.abs(elbowBend) < 0.01) {
-    lowerArmDir = { ...upperArmDir }
-  } else {
-    // Find a perpendicular vector for bending (toward body/down in local space)
-    // Cross product of upper arm direction with forward (Z) gives the bend axis
-    const bendAxis: Vector3 = {
-      x: upperArmDir.y * 1 - upperArmDir.z * 0, // cross with (0,0,1)
-      y: upperArmDir.z * 0 - upperArmDir.x * 1,
-      z: upperArmDir.x * 0 - upperArmDir.y * 0,
-    }
-    const axisLen = Math.sqrt(bendAxis.x ** 2 + bendAxis.y ** 2 + bendAxis.z ** 2)
-
-    if (axisLen > 0.01) {
-      bendAxis.x /= axisLen
-      bendAxis.y /= axisLen
-      bendAxis.z /= axisLen
-
-      // Rodrigues rotation formula for rotating around arbitrary axis
-      const c = Math.cos(-elbowBend) // negative because elbow.x is negative for flexion
-      const s = Math.sin(-elbowBend)
-      const dot = bendAxis.x * upperArmDir.x + bendAxis.y * upperArmDir.y + bendAxis.z * upperArmDir.z
-      const cross = {
-        x: bendAxis.y * upperArmDir.z - bendAxis.z * upperArmDir.y,
-        y: bendAxis.z * upperArmDir.x - bendAxis.x * upperArmDir.z,
-        z: bendAxis.x * upperArmDir.y - bendAxis.y * upperArmDir.x,
-      }
-
-      lowerArmDir = {
-        x: upperArmDir.x * c + cross.x * s + bendAxis.x * dot * (1 - c),
-        y: upperArmDir.y * c + cross.y * s + bendAxis.y * dot * (1 - c),
-        z: upperArmDir.z * c + cross.z * s + bendAxis.z * dot * (1 - c),
-      }
-    } else {
-      lowerArmDir = { ...upperArmDir }
-    }
-  }
+  // Lower arm direction using bone hierarchy: R_shoulder * R_elbow * tposeDir
+  // Step 1: Apply elbow rotation to tpose dir (in parent local space)
+  const localForearmDir = applyEulerZYX(tposeDir, elbowRot.x, elbowRot.y, elbowRot.z)
+  // Step 2: Apply shoulder rotation to get world direction
+  const lowerArmDir = applyEulerZYX(localForearmDir, shoulderRot.x, shoulderRot.y, shoulderRot.z)
 
   // Wrist position
   return {
@@ -286,10 +253,9 @@ describe('IK Forward Kinematics Verification', () => {
       false
     )
 
-    // Verify FK wrist is close to target
-    // Allow larger tolerance since FK verification is approximate
-    // and VRM may use different rotation conventions than our simple FK
-    const posTolerance = 0.7
+    // Verify FK wrist matches target position
+    // With the bone hierarchy fix, FK is exact (distances ~0.0)
+    const posTolerance = 0.01
 
     const leftDist = distance(leftWristFK, leftWristTarget)
     const rightDist = distance(rightWristFK, rightWristTarget)

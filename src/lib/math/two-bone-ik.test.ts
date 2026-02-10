@@ -481,21 +481,16 @@ describe('solveArmDirect - elbow full 3DOF rotation', () => {
       isLeft: true,
     })
 
-    // The upper arm direction is (0, -1, 0)
-    // The lower arm direction is (0, 0, -1)
-    // The elbow rotation should transform upper arm dir to lower arm dir
-    // This is a 90° rotation
-    const upperArmDir = vecNormalize({ x: 0, y: -1, z: 0 })
-    const rotatedDir = applyEulerZYX(
-      upperArmDir,
-      result.elbow.x,
-      result.elbow.y,
-      result.elbow.z,
-    )
+    // Bone hierarchy FK: worldDir = R_shoulder * R_elbow * tposeDir
+    const tposeDir: Vector3 = { x: -1, y: 0, z: 0 }
+    // Step 1: Apply elbow rotation to tpose dir (in parent local space)
+    const localResult = applyEulerZYX(tposeDir, result.elbow.x, result.elbow.y, result.elbow.z)
+    // Step 2: Apply shoulder rotation to get world direction
+    const forearmWorldDir = applyEulerZYX(localResult, result.shoulder.x, result.shoulder.y, result.shoulder.z)
 
     const lowerArmDir = vecNormalize({ x: 0, y: 0, z: -1 })
-    // The rotated upper arm direction should match the lower arm direction
-    expect(vecDot(rotatedDir, lowerArmDir)).toBeGreaterThan(0.9)
+    // The bone hierarchy forearm direction should match the actual lower arm direction
+    expect(vecDot(vecNormalize(forearmWorldDir), lowerArmDir)).toBeGreaterThan(0.9)
   })
 
   it('should produce correct elbow rotation when forearm bends inward', () => {
@@ -507,17 +502,13 @@ describe('solveArmDirect - elbow full 3DOF rotation', () => {
       isLeft: true,
     })
 
-    // The elbow rotation should transform (-1,0,0) -> (0,-1,0)
-    const upperArmDir = vecNormalize({ x: -1, y: 0, z: 0 })
-    const rotatedDir = applyEulerZYX(
-      upperArmDir,
-      result.elbow.x,
-      result.elbow.y,
-      result.elbow.z,
-    )
+    // Bone hierarchy FK: worldDir = R_shoulder * R_elbow * tposeDir
+    const tposeDir: Vector3 = { x: -1, y: 0, z: 0 }
+    const localResult = applyEulerZYX(tposeDir, result.elbow.x, result.elbow.y, result.elbow.z)
+    const forearmWorldDir = applyEulerZYX(localResult, result.shoulder.x, result.shoulder.y, result.shoulder.z)
 
     const lowerArmDir = vecNormalize({ x: 0, y: -1, z: 0 })
-    expect(vecDot(rotatedDir, lowerArmDir)).toBeGreaterThan(0.9)
+    expect(vecDot(vecNormalize(forearmWorldDir), lowerArmDir)).toBeGreaterThan(0.9)
   })
 
   it('should produce correct end-to-end arm direction using both shoulder and elbow rotations', () => {
@@ -543,16 +534,165 @@ describe('solveArmDirect - elbow full 3DOF rotation', () => {
     // Upper arm should point roughly downward
     expect(upperArmResult.y).toBeLessThan(-0.8)
 
-    // Apply elbow rotation to upper arm direction to get forearm direction
-    const forearmResult = applyEulerZYX(
-      upperArmResult,
+    // Bone hierarchy FK: worldDir = R_shoulder * R_elbow * tposeDir
+    // Step 1: Apply elbow rotation to tpose (in parent local space)
+    const elbowResult = applyEulerZYX(
+      tposeDir,
       result.elbow.x,
       result.elbow.y,
       result.elbow.z,
     )
+    // Step 2: Apply shoulder rotation to get world forearm direction
+    const forearmResult = applyEulerZYX(
+      elbowResult,
+      result.shoulder.x,
+      result.shoulder.y,
+      result.shoulder.z,
+    )
 
     // Forearm should point roughly forward (negative Z)
     expect(forearmResult.z).toBeLessThan(-0.8)
+  })
+})
+
+/**
+ * BUG HYPOTHESIS: Elbow rotation is computed in world space but the VRM bone
+ * hierarchy applies it in the parent (upper arm) bone's local space.
+ *
+ * In Three.js bone hierarchy:
+ *   lowerArm_world_dir = R_shoulder * R_elbow * tposeDir
+ *
+ * But solveArmDirect computes R_elbow such that:
+ *   R_elbow * R_shoulder * tposeDir = lowerArmDir   (wrong order!)
+ *
+ * These differ because rotation composition is NOT commutative.
+ * When the shoulder has significant rotation (arms raised, extended),
+ * the elbow rotation rotates around wrong axes, often having zero effect.
+ */
+describe('Elbow rotation in parent-local space - bone hierarchy FK', () => {
+  /**
+   * Apply ZYX Euler rotation to a vector.
+   * ZYX intrinsic order: apply X first, then Y, then Z.
+   * Matrix form: M = Rz * Ry * Rx (matches Three.js Euler order 'ZYX')
+   */
+  function applyEulerZYX(v: Vector3, x: number, y: number, z: number): Vector3 {
+    const cosX = Math.cos(x), sinX = Math.sin(x)
+    const cosY = Math.cos(y), sinY = Math.sin(y)
+    const cosZ = Math.cos(z), sinZ = Math.sin(z)
+    const x1 = v.x
+    const y1 = v.y * cosX - v.z * sinX
+    const z1 = v.y * sinX + v.z * cosX
+    const x2 = x1 * cosY + z1 * sinY
+    const y2 = y1
+    const z2 = -x1 * sinY + z1 * cosY
+    const x3 = x2 * cosZ - y2 * sinZ
+    const y3 = x2 * sinZ + y2 * cosZ
+    return { x: x3, y: y3, z: z2 }
+  }
+
+  /**
+   * Bone hierarchy FK: computes the forearm direction in world space
+   * using the CORRECT bone hierarchy order.
+   *
+   * In Three.js: child_world = parent_world * child_local
+   * So: forearm_dir = R_shoulder * (R_elbow * tposeDir)
+   */
+  function boneHierarchyForearmDir(
+    tposeDir: Vector3,
+    shoulderRot: Vector3,
+    elbowRot: Vector3,
+  ): Vector3 {
+    // Step 1: Apply elbow rotation to tpose direction (in parent local space)
+    const localResult = applyEulerZYX(tposeDir, elbowRot.x, elbowRot.y, elbowRot.z)
+    // Step 2: Apply shoulder rotation to get world direction
+    return applyEulerZYX(localResult, shoulderRot.x, shoulderRot.y, shoulderRot.z)
+  }
+
+  function vecNormalize(v: Vector3): Vector3 {
+    const len = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z)
+    if (len === 0) return { x: 0, y: 0, z: 0 }
+    return { x: v.x / len, y: v.y / len, z: v.z / len }
+  }
+
+  function vecDot(a: Vector3, b: Vector3): number {
+    return a.x * b.x + a.y * b.y + a.z * b.z
+  }
+
+  it('left arm raised up + forearm pointing forward: bone FK should match target direction', () => {
+    // Scenario: Left arm raised straight up, forearm bends forward
+    // This is a common "surrender" or "hands up" pose
+    const result = solveArmDirect({
+      shoulder: { x: 0, y: 0, z: 0 },
+      elbow: { x: 0, y: 1, z: 0 },    // upper arm points up
+      wrist: { x: 0, y: 1, z: -1 },    // forearm points forward
+      isLeft: true,
+    })
+
+    const tposeDir: Vector3 = { x: -1, y: 0, z: 0 }
+    const expectedLowerArmDir = vecNormalize({ x: 0, y: 0, z: -1 }) // forward
+
+    // Use the CORRECT bone hierarchy FK: R_shoulder * R_elbow * tposeDir
+    const forearmDir = boneHierarchyForearmDir(tposeDir, result.shoulder, result.elbow)
+    const forearmNorm = vecNormalize(forearmDir)
+
+    // The forearm should point roughly forward (negative Z)
+    // Using dot product > 0.8 means directions are within ~37° of each other
+    expect(vecDot(forearmNorm, expectedLowerArmDir)).toBeGreaterThan(0.8)
+  })
+
+  it('left arm pointing forward + forearm bending down: bone FK should match target direction', () => {
+    // Scenario: Left arm extends forward, forearm bends downward
+    const result = solveArmDirect({
+      shoulder: { x: 0, y: 0, z: 0 },
+      elbow: { x: 0, y: 0, z: -1 },    // upper arm points forward
+      wrist: { x: 0, y: -1, z: -1 },    // forearm points down
+      isLeft: true,
+    })
+
+    const tposeDir: Vector3 = { x: -1, y: 0, z: 0 }
+    const expectedLowerArmDir = vecNormalize({ x: 0, y: -1, z: 0 }) // down
+
+    const forearmDir = boneHierarchyForearmDir(tposeDir, result.shoulder, result.elbow)
+    const forearmNorm = vecNormalize(forearmDir)
+
+    expect(vecDot(forearmNorm, expectedLowerArmDir)).toBeGreaterThan(0.8)
+  })
+
+  it('right arm raised up + forearm pointing forward: bone FK should match target direction', () => {
+    // Mirror of first test for right arm
+    const result = solveArmDirect({
+      shoulder: { x: 0, y: 0, z: 0 },
+      elbow: { x: 0, y: 1, z: 0 },    // upper arm points up
+      wrist: { x: 0, y: 1, z: -1 },    // forearm points forward
+      isLeft: false,
+    })
+
+    const tposeDir: Vector3 = { x: 1, y: 0, z: 0 }
+    const expectedLowerArmDir = vecNormalize({ x: 0, y: 0, z: -1 }) // forward
+
+    const forearmDir = boneHierarchyForearmDir(tposeDir, result.shoulder, result.elbow)
+    const forearmNorm = vecNormalize(forearmDir)
+
+    expect(vecDot(forearmNorm, expectedLowerArmDir)).toBeGreaterThan(0.8)
+  })
+
+  it('left arm raised diagonally + forearm bending inward: bone FK should match target direction', () => {
+    // Scenario: More realistic - arm raised up and slightly forward, forearm bends inward
+    const result = solveArmDirect({
+      shoulder: { x: 0, y: 0, z: 0 },
+      elbow: { x: -0.3, y: 1, z: -0.3 },   // upper arm mostly up, slightly left+forward
+      wrist: { x: -0.3, y: 1.7, z: -0.8 },  // forearm continues up and more forward
+      isLeft: true,
+    })
+
+    const tposeDir: Vector3 = { x: -1, y: 0, z: 0 }
+    // Expected lower arm direction: wrist - elbow
+    const expectedLowerArmDir = vecNormalize({ x: 0, y: 0.7, z: -0.5 })
+
+    const forearmDir = boneHierarchyForearmDir(tposeDir, result.shoulder, result.elbow)
+    const forearmNorm = vecNormalize(forearmDir)
+
+    expect(vecDot(forearmNorm, expectedLowerArmDir)).toBeGreaterThan(0.8)
   })
 })
 
