@@ -1,72 +1,48 @@
 import { describe, it, expect } from 'vitest'
-import {
-  createSetupMessage,
-  createFrameMessage,
-  createConfigMessage,
-  parseWorkerResponse,
-  type WorkerMessage,
-  type WorkerResponse,
-} from './protocol'
+import type { WorkerInMessage, WorkerOutMessage, WorkerDetectionInfo } from './protocol'
 
 describe('WorkerProtocol', () => {
-  describe('createSetupMessage', () => {
-    it('should create setup message with type and config', () => {
-      const message = createSetupMessage({ smoothing: 0.5 })
+  describe('WorkerInMessage types', () => {
+    it('should type init message correctly', () => {
+      const msg: WorkerInMessage = { type: 'init', needsPose: true, needsHands: false }
+      expect(msg.type).toBe('init')
+    })
 
-      expect(message.type).toBe('setup')
-      expect(message.config).toEqual({ smoothing: 0.5 })
+    it('should type frame message correctly', () => {
+      const mockBitmap = {} as ImageBitmap
+      const msg: WorkerInMessage = { type: 'frame', bitmap: mockBitmap, timestamp: 1000 }
+      expect(msg.type).toBe('frame')
     })
   })
 
-  describe('createFrameMessage', () => {
-    it('should create frame message with imageData', () => {
-      // Mock ImageData for test environment
-      const mockImageData = {
-        width: 10,
-        height: 10,
-        data: new Uint8ClampedArray(10 * 10 * 4),
-      } as unknown as ImageData
-
-      const message = createFrameMessage(mockImageData)
-
-      expect(message.type).toBe('frame')
-      expect((message as { type: 'frame'; imageData: ImageData }).imageData).toBe(mockImageData)
-    })
-  })
-
-  describe('createConfigMessage', () => {
-    it('should create config message with partial config', () => {
-      const message = createConfigMessage({ smoothing: 0.8 })
-
-      expect(message.type).toBe('config')
-      expect((message as { type: 'config'; config: object }).config).toEqual({ smoothing: 0.8 })
-    })
-  })
-
-  describe('parseWorkerResponse', () => {
-    it('should parse ready response', () => {
-      const response = parseWorkerResponse({ type: 'ready' })
-
-      expect(response.type).toBe('ready')
+  describe('WorkerOutMessage types', () => {
+    it('should type ready message correctly', () => {
+      const msg: WorkerOutMessage = { type: 'ready', mode: 'face' }
+      expect(msg.type).toBe('ready')
+      expect(msg.mode).toBe('face')
     })
 
-    it('should parse result response with data', () => {
-      const data = { face: { pitch: 0.1 } }
-      const response = parseWorkerResponse({ type: 'result', data })
-
-      expect(response.type).toBe('result')
-      expect((response as { type: 'result'; data: unknown }).data).toEqual(data)
+    it('should type result message correctly', () => {
+      const detection: WorkerDetectionInfo = {
+        hasFace: true,
+        hasPose: false,
+        hasLeftHand: false,
+        hasRightHand: false,
+        faceLandmarkCount: 478,
+        poseLandmarkCount: 0,
+      }
+      const msg: WorkerOutMessage = {
+        type: 'result',
+        data: { face: null, pose: null, leftHand: null, rightHand: null },
+        detection,
+      }
+      expect(msg.type).toBe('result')
     })
 
-    it('should parse error response with message', () => {
-      const response = parseWorkerResponse({ type: 'error', message: 'Test error' })
-
-      expect(response.type).toBe('error')
-      expect((response as { type: 'error'; message: string }).message).toBe('Test error')
-    })
-
-    it('should throw for invalid response type', () => {
-      expect(() => parseWorkerResponse({ type: 'invalid' })).toThrow()
+    it('should type error message correctly', () => {
+      const msg: WorkerOutMessage = { type: 'error', message: 'Test error' }
+      expect(msg.type).toBe('error')
+      expect(msg.message).toBe('Test error')
     })
   })
 })

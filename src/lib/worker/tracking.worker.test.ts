@@ -1,84 +1,172 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-// Mock the worker message handling
-interface MockWorkerContext {
-  onmessage: ((event: MessageEvent) => void) | null
-  postMessage: (data: unknown) => void
-}
+// Create hoisted mocks
+const mocks = vi.hoisted(() => ({
+  holisticDetectForVideo: vi.fn(),
+  holisticClose: vi.fn(),
+  holisticCreateFromOptions: vi.fn(),
+  faceDetectForVideo: vi.fn(),
+  faceClose: vi.fn(),
+  faceCreateFromOptions: vi.fn(),
+  forVisionTasks: vi.fn(),
+  solveHolistic: vi.fn(),
+}))
 
-describe('TrackingWorker', () => {
-  let mockContext: MockWorkerContext
-  let postedMessages: unknown[]
-
-  beforeEach(() => {
-    postedMessages = []
-    mockContext = {
-      onmessage: null,
-      postMessage: (data: unknown) => {
-        postedMessages.push(data)
-      },
-    }
+vi.mock('@mediapipe/tasks-vision', () => {
+  mocks.holisticCreateFromOptions.mockResolvedValue({
+    detectForVideo: mocks.holisticDetectForVideo,
+    close: mocks.holisticClose,
+  })
+  mocks.faceCreateFromOptions.mockResolvedValue({
+    detectForVideo: mocks.faceDetectForVideo,
+    close: mocks.faceClose,
+  })
+  mocks.forVisionTasks.mockResolvedValue({
+    wasmLoaderPath: '/mock/wasm-loader.js',
+    wasmBinaryPath: '/mock/wasm.wasm',
   })
 
-  describe('handleMessage', () => {
-    it('should respond with ready after setup message', async () => {
-      const { handleMessage } = await import('./tracking.worker')
+  return {
+    FilesetResolver: { forVisionTasks: mocks.forVisionTasks },
+    HolisticLandmarker: { createFromOptions: mocks.holisticCreateFromOptions },
+    FaceLandmarker: { createFromOptions: mocks.faceCreateFromOptions },
+  }
+})
 
-      await handleMessage({ type: 'setup', config: { smoothing: 0.5 } }, mockContext.postMessage)
+vi.mock('../solver/holistic-solver', () => ({
+  solveHolistic: mocks.solveHolistic,
+}))
 
-      expect(postedMessages).toContainEqual({ type: 'ready' })
+describe('TrackingWorker', () => {
+  let postedMessages: unknown[]
+  const mockSolvedResult = {
+    face: { head: { pitch: 0, yaw: 0, roll: 0 }, eyes: { leftBlink: 0, rightBlink: 0, gazeX: 0, gazeY: 0 }, mouth: { open: 0, smile: 0 } },
+    pose: null,
+    leftHand: null,
+    rightHand: null,
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    postedMessages = []
+
+    // Re-setup mocks
+    mocks.holisticCreateFromOptions.mockResolvedValue({
+      detectForVideo: mocks.holisticDetectForVideo,
+      close: mocks.holisticClose,
+    })
+    mocks.faceCreateFromOptions.mockResolvedValue({
+      detectForVideo: mocks.faceDetectForVideo,
+      close: mocks.faceClose,
+    })
+    mocks.forVisionTasks.mockResolvedValue({
+      wasmLoaderPath: '/mock/wasm-loader.js',
+      wasmBinaryPath: '/mock/wasm.wasm',
+    })
+    mocks.solveHolistic.mockReturnValue(mockSolvedResult)
+
+    vi.stubGlobal('postMessage', (data: unknown) => {
+      postedMessages.push(data)
+    })
+  })
+
+  describe('handleInit', () => {
+    it('should initialize FaceLandmarker when no pose/hands needed', async () => {
+      const { handleInit } = await import('./tracking.worker')
+
+      await handleInit(false, false)
+
+      expect(mocks.faceCreateFromOptions).toHaveBeenCalled()
+      expect(mocks.holisticCreateFromOptions).not.toHaveBeenCalled()
+      expect(postedMessages).toContainEqual({ type: 'ready', mode: 'face' })
     })
 
-    it('should handle config update message', async () => {
-      const { handleMessage } = await import('./tracking.worker')
+    it('should initialize HolisticLandmarker when pose is needed', async () => {
+      const { handleInit } = await import('./tracking.worker')
 
-      // First setup
-      await handleMessage({ type: 'setup', config: { smoothing: 0.5 } }, mockContext.postMessage)
-      postedMessages = []
+      await handleInit(true, false)
 
-      // Then config update
-      await handleMessage({ type: 'config', config: { smoothing: 0.8 } }, mockContext.postMessage)
-
-      // Config updates don't send a response, just update internal state
-      expect(postedMessages).toHaveLength(0)
+      expect(mocks.holisticCreateFromOptions).toHaveBeenCalled()
+      expect(postedMessages).toContainEqual({ type: 'ready', mode: 'holistic' })
     })
 
-    it('should post error for unknown message type', async () => {
-      const { handleMessage } = await import('./tracking.worker')
+    it('should post error on initialization failure', async () => {
+      mocks.forVisionTasks.mockRejectedValueOnce(new Error('WASM load failed'))
+      const { handleInit } = await import('./tracking.worker')
 
-      await handleMessage({ type: 'unknown' } as never, mockContext.postMessage)
+      await handleInit(false, false)
 
       expect(postedMessages).toContainEqual(
-        expect.objectContaining({ type: 'error' })
+        expect.objectContaining({ type: 'error', message: 'WASM load failed' })
+      )
+    })
+  })
+
+  describe('handleFrame', () => {
+    it('should detect face landmarks and return solved result', async () => {
+      const { handleInit, handleFrame } = await import('./tracking.worker')
+      mocks.faceDetectForVideo.mockReturnValue({
+        faceLandmarks: [[{ x: 0.5, y: 0.5, z: 0 }]],
+      })
+
+      await handleInit(false, false)
+      postedMessages = []
+
+      const mockBitmap = { close: vi.fn() } as unknown as ImageBitmap
+      handleFrame(mockBitmap, 1000)
+
+      expect(mocks.faceDetectForVideo).toHaveBeenCalledWith(mockBitmap, 1000)
+      expect(mockBitmap.close).toHaveBeenCalled()
+      expect(mocks.solveHolistic).toHaveBeenCalled()
+      expect(postedMessages).toContainEqual(
+        expect.objectContaining({
+          type: 'result',
+          data: mockSolvedResult,
+          detection: expect.objectContaining({ hasFace: true }),
+        })
       )
     })
 
-    it('should process frame and return result when tracker is initialized', async () => {
-      const { handleMessage, setTracker } = await import('./tracking.worker')
-      const mockImageData = {
-        width: 10,
-        height: 10,
-        data: new Uint8ClampedArray(10 * 10 * 4),
-      } as unknown as ImageData
+    it('should detect holistic landmarks when in holistic mode', async () => {
+      const { handleInit, handleFrame } = await import('./tracking.worker')
+      mocks.holisticDetectForVideo.mockReturnValue({
+        faceLandmarks: [[{ x: 0.5, y: 0.5, z: 0 }]],
+        poseLandmarks: [[{ x: 0.5, y: 0.5, z: 0 }]],
+        leftHandLandmarks: [],
+        rightHandLandmarks: [],
+      })
 
-      // Mock tracker that returns empty landmarks
-      const mockTracker = {
-        detect: vi.fn().mockResolvedValue({
-          faceLandmarks: [],
-          poseLandmarks: [],
-          leftHandLandmarks: [],
-          rightHandLandmarks: [],
-        }),
-      }
-      setTracker(mockTracker)
-
-      await handleMessage({ type: 'setup', config: {} }, mockContext.postMessage)
+      await handleInit(true, false)
       postedMessages = []
 
-      await handleMessage({ type: 'frame', imageData: mockImageData }, mockContext.postMessage)
+      const mockBitmap = { close: vi.fn() } as unknown as ImageBitmap
+      handleFrame(mockBitmap, 1000)
 
+      expect(mocks.holisticDetectForVideo).toHaveBeenCalledWith(mockBitmap, 1000)
+      expect(mockBitmap.close).toHaveBeenCalled()
       expect(postedMessages).toContainEqual(
-        expect.objectContaining({ type: 'result' })
+        expect.objectContaining({
+          type: 'result',
+          detection: expect.objectContaining({ hasFace: true, hasPose: true }),
+        })
+      )
+    })
+
+    it('should close bitmap and post error on detection failure', async () => {
+      const { handleInit, handleFrame } = await import('./tracking.worker')
+      mocks.faceDetectForVideo.mockImplementation(() => {
+        throw new Error('Detection failed')
+      })
+
+      await handleInit(false, false)
+      postedMessages = []
+
+      const mockBitmap = { close: vi.fn() } as unknown as ImageBitmap
+      handleFrame(mockBitmap, 1000)
+
+      expect(mockBitmap.close).toHaveBeenCalled()
+      expect(postedMessages).toContainEqual(
+        expect.objectContaining({ type: 'error', message: 'Detection failed' })
       )
     })
   })

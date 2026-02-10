@@ -1,6 +1,8 @@
 /**
- * useVRMTracking - Integrated hook for VRM motion tracking
- * Combines MediaPipe detection, solving, and VRM animation in one hook.
+ * useVRMTracking - Integrated hook for VRM motion tracking.
+ *
+ * Runs MediaPipe inference in a Web Worker (off main thread) by default.
+ * Falls back to main-thread processing if the worker fails to initialize.
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react'
@@ -11,6 +13,7 @@ import { solveHolistic, type HolisticResult } from '../lib/solver/holistic-solve
 import { isVideoReady, waitForVideoReady } from '../lib/capture/video-readiness'
 import { useTrackingStore, type PipelineState } from '../stores/tracking-store'
 import { trackingProfiler } from '../lib/perf/profiler-instances'
+import type { WorkerOutMessage } from '../lib/worker/protocol'
 
 export interface UseVRMTrackingOptions {
   /** The VRM model to animate */
@@ -66,11 +69,17 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
   const [isWaitingForVideo, setIsWaitingForVideo] = useState(false)
   const [error, setError] = useState<Error | null>(null)
 
+  // Main-thread fallback tracker (only used if worker fails)
   const trackerRef = useRef<MediaPipeTracker | null>(null)
   const bridgeRef = useRef<TrackingBridge | null>(null)
   const rafIdRef = useRef<number | null>(null)
   const isRunningRef = useRef(false)
   const lastFrameTimeRef = useRef(0)
+
+  // Worker mode refs
+  const workerRef = useRef<Worker | null>(null)
+  const workerBusyRef = useRef(false)
+  const useWorkerRef = useRef(false)
 
   // Refs for latest settings values — avoids stale closures in async init()
   // when Zustand persist hydrates after the initial render but before bridge creation
@@ -126,14 +135,40 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
     })
   }, [])
 
+  // Simplified debug emit for worker mode (no raw landmarks available)
+  const emitWorkerDebugData = useCallback((
+    pipelineState: PipelineState,
+    solved: HolisticResult | null,
+    detection: { hasFace: boolean; hasPose: boolean; hasLeftHand: boolean; hasRightHand: boolean; faceLandmarkCount: number; poseLandmarkCount: number } | null,
+    elapsed: number,
+    timestamp: number,
+    errorMsg: string | null
+  ) => {
+    const { debugEnabled, setDebugData } = useTrackingStore.getState()
+    if (!debugEnabled) return
+
+    setDebugData({
+      pipelineState,
+      detection: detection ?? {
+        hasFace: false, hasPose: false, hasLeftHand: false, hasRightHand: false,
+        faceLandmarkCount: 0, poseLandmarkCount: 0,
+      },
+      rawPose: undefined,
+      solved,
+      performance: {
+        fps: elapsed > 0 ? 1000 / elapsed : 0,
+        frameTimeMs: elapsed,
+      },
+      lastUpdateTime: timestamp,
+      error: errorMsg,
+    })
+  }, [])
+
   // Frame interval based on target FPS
   const frameInterval = 1000 / targetFps
 
-  // Initialize MediaPipe tracker
-  // This effect waits for video to be ready before starting tracking,
-  // solving the race condition where tracking could start before video has data.
+  // Initialize MediaPipe (worker mode with main-thread fallback)
   useEffect(() => {
-    // Emit diagnostic info about why tracking might not start
     if (!enabled) {
       emitDebugData('idle', null, null, 0, Date.now(), 'Tracking disabled')
       return
@@ -150,6 +185,66 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
     const video = videoRef.current
     let cancelled = false
 
+    async function initWorker(): Promise<boolean> {
+      try {
+        const worker = new Worker(
+          new URL('../lib/worker/tracking.worker.ts', import.meta.url),
+          { type: 'module' }
+        )
+
+        return await new Promise<boolean>((resolve) => {
+          const timeout = setTimeout(() => {
+            worker.terminate()
+            resolve(false)
+          }, 15000)
+
+          worker.onmessage = (e: MessageEvent<WorkerOutMessage>) => {
+            if (e.data.type === 'ready') {
+              clearTimeout(timeout)
+              workerRef.current = worker
+              console.log(`[perf] MediaPipe worker mode: ${e.data.mode}`)
+              resolve(true)
+            } else if (e.data.type === 'error') {
+              clearTimeout(timeout)
+              console.warn('[perf] Worker init failed, falling back to main thread:', e.data.message)
+              worker.terminate()
+              resolve(false)
+            }
+          }
+
+          worker.onerror = () => {
+            clearTimeout(timeout)
+            worker.terminate()
+            resolve(false)
+          }
+
+          worker.postMessage({
+            type: 'init',
+            needsPose: poseTracking,
+            needsHands: handTracking,
+          })
+        })
+      } catch {
+        return false
+      }
+    }
+
+    async function initDirect(): Promise<void> {
+      const tracker = new MediaPipeTracker({
+        needsPose: poseTracking,
+        needsHands: handTracking,
+      })
+      await tracker.initialize()
+
+      if (cancelled) {
+        await tracker.dispose()
+        return
+      }
+
+      trackerRef.current = tracker
+      console.log(`[perf] MediaPipe main-thread mode: ${tracker.mode}`)
+    }
+
     async function init() {
       setIsInitializing(true)
       setIsWaitingForVideo(false)
@@ -157,25 +252,22 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
       emitDebugData('initializing', null, null, 0, Date.now(), 'Initializing MediaPipe...')
 
       try {
-        // Create tracker - use lightweight FaceLandmarker when pose/hand tracking not needed
-        const tracker = new MediaPipeTracker({
-          needsPose: poseTracking,
-          needsHands: handTracking,
-        })
-        await tracker.initialize()
+        // Try worker mode first, fall back to main thread
+        const workerOk = await initWorker()
+        if (cancelled) return
 
-        if (cancelled) {
-          await tracker.dispose()
-          return
+        if (workerOk) {
+          useWorkerRef.current = true
+        } else {
+          useWorkerRef.current = false
+          await initDirect()
+          if (cancelled) return
         }
 
-        trackerRef.current = tracker
-        console.log(`[perf] MediaPipe model: ${tracker.mode}`)
-        emitDebugData('initializing', null, null, 0, Date.now(), `MediaPipe ready (${tracker.mode} mode), creating bridge...`)
+        emitDebugData('initializing', null, null, 0, Date.now(),
+          `MediaPipe ready (${useWorkerRef.current ? 'worker' : 'main-thread'}), creating bridge...`)
 
-        // Create bridge (vrm is guaranteed non-null here due to guard at start of effect)
-        // Read from refs to get post-hydration values (Zustand persist may have
-        // updated the store between initial render and this point in async init)
+        // Create bridge
         bridgeRef.current = new TrackingBridge(vrm!, {
           smoothing: smoothingRef.current,
           faceTracking: faceTrackingRef.current,
@@ -185,7 +277,7 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
 
         setIsInitializing(false)
 
-        // Wait for video to be ready before starting tracking loop
+        // Wait for video to be ready
         if (!isVideoReady(video)) {
           setIsWaitingForVideo(true)
           emitDebugData('waiting-video', null, null, 0, Date.now(),
@@ -205,12 +297,29 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
 
         if (cancelled) return
 
+        // Wire up worker message handler for receiving results
+        if (useWorkerRef.current && workerRef.current) {
+          const bridge = bridgeRef.current!
+          workerRef.current.onmessage = (e: MessageEvent<WorkerOutMessage>) => {
+            if (e.data.type === 'result') {
+              trackingProfiler.end('mediapipe')
+              trackingProfiler.begin('bridge')
+              bridge.update(e.data.data)
+              trackingProfiler.end('bridge')
+              emitWorkerDebugData('tracking', e.data.data, e.data.detection, 0, Date.now(), null)
+              workerBusyRef.current = false
+            } else if (e.data.type === 'error') {
+              console.warn('Worker frame error:', e.data.message)
+              workerBusyRef.current = false
+            }
+          }
+        }
+
         setIsWaitingForVideo(false)
         setIsTracking(true)
         isRunningRef.current = true
         emitDebugData('tracking', null, null, 0, Date.now(), 'Starting tracking loop...')
 
-        // Start tracking loop
         startTrackingLoop()
       } catch (err) {
         if (!cancelled) {
@@ -229,11 +338,8 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
       cancelled = true
       cleanup()
     }
-  // Note: stream is used as a trigger to re-run when camera becomes available
-  // videoRef.current is checked in effect body
-  // emitDebugData has stable reference (empty deps) so won't cause re-runs
   // poseTracking/handTracking trigger re-init to switch between FaceLandmarker and HolisticLandmarker
-  }, [enabled, vrm, stream, poseTracking, handTracking, emitDebugData])
+  }, [enabled, vrm, stream, poseTracking, handTracking, emitDebugData, emitWorkerDebugData])
 
   // Update bridge options when settings change
   useEffect(() => {
@@ -263,20 +369,54 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
         rafIdRef.current = requestAnimationFrame(loop)
         return
       }
-      // Carry forward remainder to prevent drift and frame skipping
       lastFrameTimeRef.current = timestamp - (elapsed % frameInterval)
 
       const video = videoRef.current
-      const tracker = trackerRef.current
       const bridge = bridgeRef.current
 
-      if (!video || !tracker || !bridge) {
+      if (!video || !bridge) {
         rafIdRef.current = requestAnimationFrame(loop)
         return
       }
 
-      // Check if video is ready
       if (video.readyState < 2 || video.videoWidth === 0) {
+        rafIdRef.current = requestAnimationFrame(loop)
+        return
+      }
+
+      // === Worker mode: capture bitmap, transfer to worker ===
+      if (useWorkerRef.current && workerRef.current) {
+        // Backpressure: skip frame if worker is still processing
+        if (workerBusyRef.current) {
+          rafIdRef.current = requestAnimationFrame(loop)
+          return
+        }
+
+        trackingProfiler.markFrame()
+        trackingProfiler.begin('mediapipe')
+        workerBusyRef.current = true
+
+        createImageBitmap(video).then((bitmap) => {
+          if (workerRef.current && isRunningRef.current) {
+            workerRef.current.postMessage(
+              { type: 'frame', bitmap, timestamp },
+              [bitmap] // Transfer ownership (zero-copy)
+            )
+          } else {
+            bitmap.close()
+            workerBusyRef.current = false
+          }
+        }).catch(() => {
+          workerBusyRef.current = false
+        })
+
+        rafIdRef.current = requestAnimationFrame(loop)
+        return
+      }
+
+      // === Main-thread fallback mode ===
+      const tracker = trackerRef.current
+      if (!tracker) {
         rafIdRef.current = requestAnimationFrame(loop)
         return
       }
@@ -284,13 +424,11 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
       try {
         trackingProfiler.markFrame()
 
-        // Detect landmarks using MediaPipe
         trackingProfiler.begin('mediapipe')
         const mediaPipeResult = tracker.detectLandmarks(video, timestamp)
         trackingProfiler.end('mediapipe')
 
         if (mediaPipeResult) {
-          // Convert MediaPipe result to our format and solve
           trackingProfiler.begin('solver')
           const result = solveHolistic({
             face: mediaPipeResult.faceLandmarks?.[0] ?? [],
@@ -300,15 +438,12 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
           })
           trackingProfiler.end('solver')
 
-          // Apply to VRM
           trackingProfiler.begin('bridge')
           bridge.update(result)
           trackingProfiler.end('bridge')
 
-          // Emit debug data
           emitDebugData('tracking', mediaPipeResult, result, elapsed, timestamp, null)
         } else {
-          // No detection result
           emitDebugData('tracking', null, null, elapsed, timestamp, null)
         }
       } catch (err) {
@@ -330,6 +465,13 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
       rafIdRef.current = null
     }
 
+    if (workerRef.current) {
+      workerRef.current.terminate()
+      workerRef.current = null
+      useWorkerRef.current = false
+      workerBusyRef.current = false
+    }
+
     if (bridgeRef.current) {
       bridgeRef.current.dispose()
       bridgeRef.current = null
@@ -345,10 +487,15 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
   }, [])
 
   const start = useCallback(() => {
-    if (!isRunningRef.current && trackerRef.current?.isReady()) {
-      isRunningRef.current = true
-      setIsTracking(true)
-      startTrackingLoop()
+    if (!isRunningRef.current) {
+      const ready = useWorkerRef.current
+        ? workerRef.current !== null
+        : trackerRef.current?.isReady()
+      if (ready) {
+        isRunningRef.current = true
+        setIsTracking(true)
+        startTrackingLoop()
+      }
     }
   }, [startTrackingLoop])
 

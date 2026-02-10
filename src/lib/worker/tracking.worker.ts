@@ -1,61 +1,121 @@
 /**
- * Tracking Worker - Handles MediaPipe tracking in a Web Worker context.
+ * Tracking Worker - Runs MediaPipe inference + solving off the main thread.
+ *
+ * Accepts ImageBitmap frames via postMessage (transferred, zero-copy),
+ * runs detection and solving, and posts back the solved HolisticResult.
  */
 
-import type { WorkerMessage, WorkerResponse, WorkerConfig } from './protocol'
-import { solveHolistic, type HolisticResult } from '../solver/holistic-solver'
+import {
+  FilesetResolver,
+  FaceLandmarker,
+  HolisticLandmarker,
+} from '@mediapipe/tasks-vision'
+import { solveHolistic } from '../solver/holistic-solver'
+import type { WorkerInMessage, WorkerOutMessage, WorkerDetectionInfo } from './protocol'
 
-export interface TrackerResult {
-  faceLandmarks: Array<{ x: number; y: number; z: number }>[]
-  poseLandmarks: Array<{ x: number; y: number; z: number; visibility?: number }>[]
-  leftHandLandmarks: Array<{ x: number; y: number; z: number }>[]
-  rightHandLandmarks: Array<{ x: number; y: number; z: number }>[]
+const MEDIAPIPE_VERSION = '0.10.32'
+const WASM_BASE_PATH = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}/wasm`
+
+let holisticLandmarker: HolisticLandmarker | null = null
+let faceLandmarker: FaceLandmarker | null = null
+
+function post(msg: WorkerOutMessage) {
+  self.postMessage(msg)
 }
 
-export interface Tracker {
-  detect: (imageData: ImageData) => Promise<TrackerResult>
-}
+async function handleInit(needsPose: boolean, needsHands: boolean) {
+  // Clean up previous instances on re-init
+  holisticLandmarker?.close()
+  holisticLandmarker = null
+  faceLandmarker?.close()
+  faceLandmarker = null
 
-let config: WorkerConfig = {}
-let tracker: Tracker | null = null
+  try {
+    const vision = await FilesetResolver.forVisionTasks(WASM_BASE_PATH)
 
-// For testing purposes
-export function setTracker(t: Tracker): void {
-  tracker = t
-}
-
-export async function handleMessage(
-  message: WorkerMessage,
-  postMessage: (response: WorkerResponse) => void
-): Promise<void> {
-  switch (message.type) {
-    case 'setup':
-      config = message.config
-      postMessage({ type: 'ready' })
-      break
-    case 'config':
-      config = { ...config, ...message.config }
-      break
-    case 'frame':
-      if (tracker) {
-        const result = await tracker.detect(message.imageData)
-        const solved = solveHolistic({
-          face: result.faceLandmarks[0] ?? [],
-          pose: result.poseLandmarks[0] ?? [],
-          leftHand: result.leftHandLandmarks[0] ?? [],
-          rightHand: result.rightHandLandmarks[0] ?? [],
-        })
-        postMessage({ type: 'result', data: solved })
-      }
-      break
-    default:
-      postMessage({ type: 'error', message: `Unknown message type: ${(message as { type: string }).type}` })
+    if (needsPose || needsHands) {
+      holisticLandmarker = await HolisticLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            'https://storage.googleapis.com/mediapipe-models/holistic_landmarker/holistic_landmarker/float16/1/holistic_landmarker.task',
+          delegate: 'GPU',
+        },
+        runningMode: 'VIDEO',
+      })
+      post({ type: 'ready', mode: 'holistic' })
+    } else {
+      faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+          delegate: 'GPU',
+        },
+        runningMode: 'VIDEO',
+        numFaces: 1,
+        outputFaceBlendshapes: false,
+        outputFacialTransformationMatrixes: false,
+      })
+      post({ type: 'ready', mode: 'face' })
+    }
+  } catch (err) {
+    post({ type: 'error', message: err instanceof Error ? err.message : String(err) })
   }
 }
 
-// Worker context setup (only runs in actual worker)
+function handleFrame(bitmap: ImageBitmap, timestamp: number) {
+  try {
+    let faceLandmarks: { x: number; y: number; z: number }[][] = []
+    let poseLandmarks: { x: number; y: number; z: number }[][] = []
+    let leftHandLandmarks: { x: number; y: number; z: number }[][] = []
+    let rightHandLandmarks: { x: number; y: number; z: number }[][] = []
+
+    if (holisticLandmarker) {
+      const result = holisticLandmarker.detectForVideo(bitmap, timestamp)
+      faceLandmarks = result.faceLandmarks
+      poseLandmarks = result.poseLandmarks
+      leftHandLandmarks = result.leftHandLandmarks
+      rightHandLandmarks = result.rightHandLandmarks
+    } else if (faceLandmarker) {
+      const result = faceLandmarker.detectForVideo(bitmap, timestamp)
+      faceLandmarks = result.faceLandmarks
+    }
+
+    bitmap.close()
+
+    const solved = solveHolistic({
+      face: faceLandmarks[0] ?? [],
+      pose: poseLandmarks[0] ?? [],
+      leftHand: leftHandLandmarks[0] ?? [],
+      rightHand: rightHandLandmarks[0] ?? [],
+    })
+
+    const detection: WorkerDetectionInfo = {
+      hasFace: (faceLandmarks[0]?.length ?? 0) > 0,
+      hasPose: (poseLandmarks[0]?.length ?? 0) > 0,
+      hasLeftHand: (leftHandLandmarks[0]?.length ?? 0) > 0,
+      hasRightHand: (rightHandLandmarks[0]?.length ?? 0) > 0,
+      faceLandmarkCount: faceLandmarks[0]?.length ?? 0,
+      poseLandmarkCount: poseLandmarks[0]?.length ?? 0,
+    }
+
+    post({ type: 'result', data: solved, detection })
+  } catch (err) {
+    bitmap.close()
+    post({ type: 'error', message: err instanceof Error ? err.message : String(err) })
+  }
+}
+
+// Exported for unit testing
+export { handleInit, handleFrame }
+
+// Worker context setup
 if (typeof self !== 'undefined' && 'postMessage' in self) {
-  self.onmessage = (event: MessageEvent<WorkerMessage>) => {
-    handleMessage(event.data, self.postMessage.bind(self))
+  self.onmessage = (event: MessageEvent<WorkerInMessage>) => {
+    const msg = event.data
+    if (msg.type === 'init') {
+      handleInit(msg.needsPose, msg.needsHands)
+    } else if (msg.type === 'frame') {
+      handleFrame(msg.bitmap, msg.timestamp)
+    }
   }
 }
