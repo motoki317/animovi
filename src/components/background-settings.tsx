@@ -6,9 +6,10 @@
  */
 
 import { type ChangeEvent } from 'react'
+import type { BackgroundType } from '../stores/settings-store'
 import './background-settings.css'
 
-export type BackgroundType = 'solid' | 'transparent' | 'image'
+export type { BackgroundType }
 
 export interface BackgroundConfig {
   type: BackgroundType

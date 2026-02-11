@@ -6,12 +6,9 @@
  */
 
 import type { PoseLandmarks } from '../solver/pose-solver'
+import type { Vector3 } from '../math/two-bone-ik'
 
-export interface Vector3 {
-  x: number
-  y: number
-  z: number
-}
+export type { Vector3 }
 
 export interface PoseFixture {
   name: string

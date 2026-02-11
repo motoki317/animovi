@@ -11,10 +11,8 @@ import {
   HolisticLandmarker,
 } from '@mediapipe/tasks-vision'
 import { solveHolistic } from '../solver/holistic-solver'
+import { WASM_BASE_PATH, HOLISTIC_MODEL_PATH, FACE_MODEL_PATH } from '../mediapipe/constants'
 import type { WorkerInMessage, WorkerOutMessage, WorkerDetectionInfo } from './protocol'
-
-const MEDIAPIPE_VERSION = '0.10.32'
-const WASM_BASE_PATH = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}/wasm`
 
 let holisticLandmarker: HolisticLandmarker | null = null
 let faceLandmarker: FaceLandmarker | null = null
@@ -36,8 +34,7 @@ async function handleInit(needsPose: boolean, needsHands: boolean) {
     if (needsPose || needsHands) {
       holisticLandmarker = await HolisticLandmarker.createFromOptions(vision, {
         baseOptions: {
-          modelAssetPath:
-            'https://storage.googleapis.com/mediapipe-models/holistic_landmarker/holistic_landmarker/float16/1/holistic_landmarker.task',
+          modelAssetPath: HOLISTIC_MODEL_PATH,
           delegate: 'GPU',
         },
         runningMode: 'VIDEO',
@@ -46,8 +43,7 @@ async function handleInit(needsPose: boolean, needsHands: boolean) {
     } else {
       faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
         baseOptions: {
-          modelAssetPath:
-            'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+          modelAssetPath: FACE_MODEL_PATH,
           delegate: 'GPU',
         },
         runningMode: 'VIDEO',

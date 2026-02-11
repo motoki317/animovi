@@ -10,6 +10,7 @@ import {
   FaceLandmarker,
   HolisticLandmarker,
 } from '@mediapipe/tasks-vision'
+import { WASM_BASE_PATH, HOLISTIC_MODEL_PATH, FACE_MODEL_PATH } from './constants'
 
 /** Unified result shape matching HolisticLandmarkerResult's landmark arrays. */
 export interface TrackerResult {
@@ -40,9 +41,7 @@ export interface MediaPipeTrackerOptions {
   needsHands?: boolean
 }
 
-const MEDIAPIPE_VERSION = '0.10.32'
-const DEFAULT_WASM_BASE_PATH =
-  `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}/wasm`
+const DEFAULT_WASM_BASE_PATH = WASM_BASE_PATH
 
 export class MediaPipeTracker {
   private holisticLandmarker: HolisticLandmarker | null = null
@@ -79,8 +78,7 @@ export class MediaPipeTracker {
     if (this.options.needsPose || this.options.needsHands) {
       this.holisticLandmarker = await HolisticLandmarker.createFromOptions(vision, {
         baseOptions: {
-          modelAssetPath:
-            'https://storage.googleapis.com/mediapipe-models/holistic_landmarker/holistic_landmarker/float16/1/holistic_landmarker.task',
+          modelAssetPath: HOLISTIC_MODEL_PATH,
           delegate: 'GPU',
         },
         runningMode: 'VIDEO',
@@ -91,8 +89,7 @@ export class MediaPipeTracker {
     } else {
       this.faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
         baseOptions: {
-          modelAssetPath:
-            'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+          modelAssetPath: FACE_MODEL_PATH,
           delegate: 'GPU',
         },
         runningMode: 'VIDEO',

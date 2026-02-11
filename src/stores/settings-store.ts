@@ -4,7 +4,8 @@
 
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { BackgroundType } from '../components/background-settings'
+
+export type BackgroundType = 'solid' | 'transparent' | 'image'
 
 interface SettingsState {
   // Tracking settings
