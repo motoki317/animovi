@@ -28,29 +28,3 @@ export class KalmanFilter {
     this.estimate = null
   }
 }
-
-export interface Vector3 {
-  x: number
-  y: number
-  z: number
-}
-
-export class KalmanFilter3D {
-  private readonly filterX: KalmanFilter
-  private readonly filterY: KalmanFilter
-  private readonly filterZ: KalmanFilter
-
-  constructor(options: KalmanFilterOptions = {}) {
-    this.filterX = new KalmanFilter(options)
-    this.filterY = new KalmanFilter(options)
-    this.filterZ = new KalmanFilter(options)
-  }
-
-  update(value: Vector3): Vector3 {
-    return {
-      x: this.filterX.update(value.x),
-      y: this.filterY.update(value.y),
-      z: this.filterZ.update(value.z),
-    }
-  }
-}

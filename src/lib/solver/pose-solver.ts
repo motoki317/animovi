@@ -98,13 +98,6 @@ function solveArm(
   }
 }
 
-/**
- * Reset arm calibration (no-op for direct approach, kept for API compatibility)
- */
-export function resetArmCalibration(): void {
-  // Direct approach doesn't need calibration
-}
-
 export function solvePose(landmarks: PoseLandmarks): PoseResult | null {
   if (landmarks.length === 0) {
     return null

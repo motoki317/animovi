@@ -5,8 +5,8 @@
  * Uses fixture data to verify IK produces correct arm orientations.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest'
-import { solvePose, resetArmCalibration } from './pose-solver'
+import { describe, it, expect } from 'vitest'
+import { solvePose } from './pose-solver'
 import {
   T_POSE,
   ARMS_FORWARD,
@@ -111,10 +111,6 @@ function computeWristPositionFK(
 }
 
 describe('Pose Solver IK Integration Tests', () => {
-  beforeEach(() => {
-    resetArmCalibration()
-  })
-
   describe('Basic Functionality', () => {
     it('should return PoseResult for valid landmarks', () => {
       const result = solvePose(T_POSE.landmarks)
@@ -213,10 +209,6 @@ describe('Pose Solver IK Integration Tests', () => {
 })
 
 describe('IK Forward Kinematics Verification', () => {
-  beforeEach(() => {
-    resetArmCalibration()
-  })
-
   it.each(ALL_FIXTURES)('$name: FK wrist should reach target position', (fixture: PoseFixture) => {
     const result = solvePose(fixture.landmarks)
     expect(result).not.toBeNull()
@@ -266,10 +258,6 @@ describe('IK Forward Kinematics Verification', () => {
 })
 
 describe('Coordinate Transformation', () => {
-  beforeEach(() => {
-    resetArmCalibration()
-  })
-
   it('should flip Y axis (MediaPipe Y-down to VRM Y-up)', () => {
     // Arms down in MediaPipe (higher Y) should result in arms down in VRM (positive Z for left)
     const result = solvePose(ARMS_DOWN.landmarks)!

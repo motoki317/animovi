@@ -10,8 +10,6 @@ interface CameraContextValue {
   stream: MediaStream | null
   error: Error | null
   isLoading: boolean
-  switchCamera: (deviceId: string) => Promise<void>
-  devices: MediaDeviceInfo[]
 }
 
 const CameraContext = createContext<CameraContextValue | null>(null)
@@ -32,7 +30,6 @@ export function CameraProvider({ children }: CameraProviderProps) {
   const [stream, setStream] = useState<MediaStream | null>(null)
   const [error, setError] = useState<Error | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-  const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
 
   useEffect(() => {
     let mounted = true
@@ -46,13 +43,6 @@ export function CameraProvider({ children }: CameraProviderProps) {
         if (mounted) {
           setStream(mediaStream)
           setIsLoading(false)
-        }
-
-        // Get available devices
-        const allDevices = await navigator.mediaDevices.enumerateDevices()
-        const videoDevices = allDevices.filter((d) => d.kind === 'videoinput')
-        if (mounted) {
-          setDevices(videoDevices)
         }
       } catch (e) {
         if (mounted) {
@@ -72,26 +62,8 @@ export function CameraProvider({ children }: CameraProviderProps) {
     }
   }, [])
 
-  const switchCamera = async (deviceId: string) => {
-    try {
-      // Stop current stream
-      if (stream) {
-        stream.getTracks().forEach((track) => track.stop())
-      }
-
-      const newStream = await navigator.mediaDevices.getUserMedia({
-        video: { deviceId: { exact: deviceId } },
-        audio: false,
-      })
-      setStream(newStream)
-      setError(null)
-    } catch (e) {
-      setError(e instanceof Error ? e : new Error('Failed to switch camera'))
-    }
-  }
-
   return (
-    <CameraContext.Provider value={{ stream, error, isLoading, switchCamera, devices }}>
+    <CameraContext.Provider value={{ stream, error, isLoading }}>
       {children}
     </CameraContext.Provider>
   )
