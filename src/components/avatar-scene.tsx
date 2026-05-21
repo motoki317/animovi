@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
+import { VRMUtils } from '@pixiv/three-vrm'
 import type { VRM } from '@pixiv/three-vrm'
 import type { BackgroundType } from './background-settings'
 import { renderProfiler } from '../lib/perf/profiler-instances'
@@ -248,8 +249,10 @@ export function AvatarScene({
     if (!sceneRef.current) return
 
     if (vrm?.scene) {
-      // Rotate VRM to face camera (VRM models are exported facing +Z, camera is at +Z)
-      vrm.scene.rotation.y = Math.PI
+      // VRM 0.x models face +Z natively; VRM 1.x face -Z. The default Three.js camera
+      // sits at +Z looking toward origin, so VRM 0.x must be flipped to match VRM 1.x.
+      // rotateVRM0 is a no-op for VRM 1.x.
+      VRMUtils.rotateVRM0(vrm)
       sceneRef.current.add(vrm.scene)
 
       // Auto-frame to head position when VRM loads (only once per VRM)

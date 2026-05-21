@@ -275,8 +275,9 @@ describe('AvatarScene', () => {
     expect(screen.getByTestId('avatar-scene')).toBeDefined()
   })
 
-  it('should rotate VRM to face camera when added to scene', () => {
-    const mockVRM = {
+  it('should rotate VRM 0.x to face camera, leave VRM 1.x as-is', () => {
+    const makeMockVRM = (metaVersion: '0' | '1') => ({
+      meta: { metaVersion },
       scene: {
         traverse: vi.fn(),
         rotation: { y: 0 },
@@ -290,12 +291,15 @@ describe('AvatarScene', () => {
         }),
       },
       update: vi.fn(),
-    }
+    })
 
-    render(<AvatarScene vrm={mockVRM as never} />)
+    const v0 = makeMockVRM('0')
+    render(<AvatarScene vrm={v0 as never} />)
+    expect(v0.scene.rotation.y).toBe(Math.PI)
 
-    // VRM should be rotated 180 degrees (Math.PI) to face camera
-    expect(mockVRM.scene.rotation.y).toBe(Math.PI)
+    const v1 = makeMockVRM('1')
+    render(<AvatarScene vrm={v1 as never} />)
+    expect(v1.scene.rotation.y).toBe(0)
   })
 
   it('should show context lost overlay when WebGL context is lost', () => {
