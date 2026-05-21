@@ -8,6 +8,7 @@ import type { VRM } from '@pixiv/three-vrm'
 import { VRMLoaderPlugin } from '@pixiv/three-vrm'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { saveVRM, loadVRM as loadVRMFromDB, updateLastUsed } from '../lib/vrm/vrm-storage'
+import { ensureEyelidExpressions } from '../lib/vrm/ensure-eye-expressions'
 
 export interface UseVRMLoaderResult {
   vrm: VRM | null
@@ -90,6 +91,10 @@ export function useVRMLoader(): UseVRMLoaderResult {
               reject(noVrmError)
               return
             }
+
+            // Fill in blink expressions for MMD-imported VRMs that ship eyelid
+            // morphs but never bind them to the preset expressions.
+            ensureEyelidExpressions(loadedVrm)
 
             // Dispose previous VRM before setting new one
             setVrm((prev) => {
