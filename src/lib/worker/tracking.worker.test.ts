@@ -169,5 +169,28 @@ describe('TrackingWorker', () => {
         expect.objectContaining({ type: 'error', message: 'Detection failed' })
       )
     })
+
+    it('always includes rawLandmarks on result (gate was removed due to races)', async () => {
+      const { handleInit, handleFrame } = await import('./tracking.worker')
+      const posePoint = { x: 0.5, y: 0.5, z: 0, visibility: 0.9 }
+      mocks.holisticDetectForVideo.mockReturnValue({
+        faceLandmarks: [],
+        poseLandmarks: [[posePoint]],
+        leftHandLandmarks: [],
+        rightHandLandmarks: [],
+      })
+
+      await handleInit(true, false)
+      postedMessages = []
+
+      const mockBitmap = { close: vi.fn() } as unknown as ImageBitmap
+      handleFrame(mockBitmap, 1000)
+
+      const result = postedMessages.find(
+        (m): m is { type: 'result'; rawLandmarks?: { pose?: unknown[] } } =>
+          typeof m === 'object' && m !== null && (m as { type?: string }).type === 'result'
+      )
+      expect(result?.rawLandmarks?.pose).toEqual([posePoint])
+    })
   })
 })

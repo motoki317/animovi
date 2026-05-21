@@ -27,6 +27,23 @@ interface EulerAngles {
   roll: number
 }
 
+/**
+ * Snapshot of the rotation actually written to a VRM bone in the last update.
+ * Captured so the stick-figure debug overlay can compare "what was applied"
+ * against the raw MediaPipe input — pinpointing whether arm-rotation shortfalls
+ * live in the solver/clamp/smoothing or upstream in tracking.
+ *
+ * `applied` is the post-smoothing, post-boneSign value written to bone.rotation
+ * (in the bone's local frame, ZYX order). `raw` is the input the bridge received
+ * for that bone before smoothing — useful for isolating the smoothing contribution.
+ */
+export interface AppliedRotation {
+  applied: { x: number; y: number; z: number }
+  raw: { x: number; y: number; z: number }
+}
+
+export type AppliedRotations = Record<string, AppliedRotation>
+
 type FilterMap = Map<string, KalmanFilter>
 
 const FAST_RESPONSIVENESS = 0.9
@@ -48,6 +65,7 @@ export class TrackingBridge {
   private prevPoseActive = false
   private prevLeftHandActive = false
   private prevRightHandActive = false
+  private appliedRotations: AppliedRotations = {}
   // Bone rotation sign correction for VRM 1.x.
   // VRM 0.x is loaded with a PI scene rotation (VRMUtils.rotateVRM0), so the bone's
   // effective world rotation is conj(R, rotY(PI)) — equivalent to flipping the sign
@@ -68,9 +86,19 @@ export class TrackingBridge {
   }
 
   /**
+   * Snapshot of the bone rotations applied during the most recent update().
+   * Returned by reference for efficiency; do not mutate.
+   */
+  getAppliedRotations(): AppliedRotations {
+    return this.appliedRotations
+  }
+
+  /**
    * Update VRM with tracking results
    */
   update(results: HolisticResult): void {
+    this.appliedRotations = {}
+
     if (this.options.faceTracking) {
       if (results.face) {
         this.prevFaceActive = true
@@ -158,12 +186,14 @@ export class TrackingBridge {
     const headBone = this.vrm.humanoid.getNormalizedBoneNode('head')
     if (headBone) {
       const smoothedRotation = this.smoothEuler('head', face.head)
-      headBone.rotation.set(
-        this.boneSign * smoothedRotation.pitch,
-        smoothedRotation.yaw,
-        this.boneSign * smoothedRotation.roll,
-        'ZYX'
-      )
+      const x = this.boneSign * smoothedRotation.pitch
+      const y = smoothedRotation.yaw
+      const z = this.boneSign * smoothedRotation.roll
+      headBone.rotation.set(x, y, z, 'ZYX')
+      this.appliedRotations.head = {
+        applied: { x, y, z },
+        raw: { x: face.head.pitch, y: face.head.yaw, z: face.head.roll },
+      }
     }
 
     // Apply eye gaze to eye bones
@@ -190,12 +220,14 @@ export class TrackingBridge {
     const spineBone = this.vrm.humanoid.getNormalizedBoneNode('spine')
     if (spineBone) {
       const smoothedRotation = this.smoothEuler('spine', pose.spine)
-      spineBone.rotation.set(
-        this.boneSign * smoothedRotation.pitch,
-        smoothedRotation.yaw,
-        this.boneSign * smoothedRotation.roll,
-        'ZYX'
-      )
+      const x = this.boneSign * smoothedRotation.pitch
+      const y = smoothedRotation.yaw
+      const z = this.boneSign * smoothedRotation.roll
+      spineBone.rotation.set(x, y, z, 'ZYX')
+      this.appliedRotations.spine = {
+        applied: { x, y, z },
+        raw: { x: pose.spine.pitch, y: pose.spine.yaw, z: pose.spine.roll },
+      }
     }
 
     // Apply arm rotations (fall back to default pose if arm not visible)
@@ -238,12 +270,14 @@ export class TrackingBridge {
     const bone = this.vrm.humanoid.getNormalizedBoneNode(boneName as never)
     if (bone) {
       const smoothedRotation = this.smoothEuler(boneName, rotation)
-      bone.rotation.set(
-        this.boneSign * smoothedRotation.pitch,
-        smoothedRotation.yaw,
-        this.boneSign * smoothedRotation.roll,
-        'ZYX'
-      )
+      const x = this.boneSign * smoothedRotation.pitch
+      const y = smoothedRotation.yaw
+      const z = this.boneSign * smoothedRotation.roll
+      bone.rotation.set(x, y, z, 'ZYX')
+      this.appliedRotations[boneName] = {
+        applied: { x, y, z },
+        raw: { x: rotation.pitch, y: rotation.yaw, z: rotation.roll },
+      }
     }
   }
 
@@ -262,9 +296,15 @@ export class TrackingBridge {
         const curl = this.smoothValue(`${boneName}Curl`, fingerData.curl)
         const spread = this.smoothValue(`${boneName}Spread`, fingerData.spread)
         // Curl is applied as X rotation (bending finger), max 90 degrees
-        bone.rotation.x = this.boneSign * curl * Math.PI * 0.5
+        const rx = this.boneSign * curl * Math.PI * 0.5
         // Spread is applied as Z rotation (lateral splay), max ~30 degrees
-        bone.rotation.z = this.boneSign * spread * Math.PI / 6
+        const rz = this.boneSign * spread * Math.PI / 6
+        bone.rotation.x = rx
+        bone.rotation.z = rz
+        this.appliedRotations[boneName] = {
+          applied: { x: rx, y: 0, z: rz },
+          raw: { x: fingerData.curl, y: 0, z: fingerData.spread },
+        }
       }
     }
   }

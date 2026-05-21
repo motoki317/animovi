@@ -9,6 +9,7 @@ describe('useTrackingStore', () => {
       result: null,
       debugData: null,
       debugEnabled: false,
+      stickFigureEnabled: false,
     })
   })
 
@@ -19,6 +20,12 @@ describe('useTrackingStore', () => {
     expect(state.result).toBeNull()
     expect(state.debugData).toBeNull()
     expect(state.debugEnabled).toBe(false)
+    expect(state.stickFigureEnabled).toBe(false)
+  })
+
+  it('should update stickFigureEnabled state', () => {
+    useTrackingStore.getState().setStickFigureEnabled(true)
+    expect(useTrackingStore.getState().stickFigureEnabled).toBe(true)
   })
 
   it('should update isTracking state', () => {

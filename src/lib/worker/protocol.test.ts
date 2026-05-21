@@ -13,6 +13,13 @@ describe('WorkerProtocol', () => {
       const msg: WorkerInMessage = { type: 'frame', bitmap: mockBitmap, timestamp: 1000 }
       expect(msg.type).toBe('frame')
     })
+
+    it('should type set-debug message correctly', () => {
+      const on: WorkerInMessage = { type: 'set-debug', enabled: true }
+      const off: WorkerInMessage = { type: 'set-debug', enabled: false }
+      expect(on.type).toBe('set-debug')
+      expect(off.type).toBe('set-debug')
+    })
   })
 
   describe('WorkerOutMessage types', () => {
@@ -37,6 +44,28 @@ describe('WorkerProtocol', () => {
         detection,
       }
       expect(msg.type).toBe('result')
+    })
+
+    it('should allow optional rawLandmarks on result', () => {
+      const detection: WorkerDetectionInfo = {
+        hasFace: false,
+        hasPose: true,
+        hasLeftHand: false,
+        hasRightHand: false,
+        faceLandmarkCount: 0,
+        poseLandmarkCount: 33,
+      }
+      const msg: WorkerOutMessage = {
+        type: 'result',
+        data: { face: null, pose: null, leftHand: null, rightHand: null },
+        detection,
+        rawLandmarks: {
+          pose: [{ x: 0.5, y: 0.5, z: 0, visibility: 0.9 }],
+        },
+      }
+      if (msg.type === 'result') {
+        expect(msg.rawLandmarks?.pose?.length).toBe(1)
+      }
     })
 
     it('should type error message correctly', () => {

@@ -10,6 +10,7 @@ import { AvatarScene } from '../components/avatar-scene'
 import { SettingsPanel } from '../components/settings-panel'
 import { BackgroundSettings, type BackgroundConfig } from '../components/background-settings'
 import { TrackingDebugOverlay } from '../components/tracking-debug-overlay'
+import { TrackingStickfigureOverlay } from '../components/tracking-stickfigure-overlay'
 import { PerformanceOverlay, type RendererInfo } from '../components/performance-overlay'
 import { useVRMLoader } from '../hooks/use-vrm-loader'
 import { useVRMTracking } from '../hooks/use-vrm-tracking'
@@ -30,6 +31,8 @@ function HomePageContent() {
   const { stream } = useCamera()
   const debugEnabled = useTrackingStore((s) => s.debugEnabled)
   const setDebugEnabled = useTrackingStore((s) => s.setDebugEnabled)
+  const stickFigureEnabled = useTrackingStore((s) => s.stickFigureEnabled)
+  const setStickFigureEnabled = useTrackingStore((s) => s.setStickFigureEnabled)
   const [perfVisible, setPerfVisible] = useState(false)
   const [rendererInfo, setRendererInfo] = useState<RendererInfo | null>(null)
 
@@ -81,11 +84,16 @@ function HomePageContent() {
       if (e.key === 'p' || e.key === 'P') {
         setPerfVisible((prev) => !prev)
       }
+
+      // S key to toggle stick-figure debug overlay
+      if (e.key === 's' || e.key === 'S') {
+        setStickFigureEnabled(!stickFigureEnabled)
+      }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [settings, debugEnabled, setDebugEnabled])
+  }, [settings, debugEnabled, setDebugEnabled, stickFigureEnabled, setStickFigureEnabled])
 
   // Refresh stored VRMs list
   const refreshStoredVRMs = useCallback(() => {
@@ -335,6 +343,35 @@ function HomePageContent() {
               />
             </div>
 
+            {/* Debug Overlays */}
+            <div style={{ padding: '0 1rem 1rem', borderTop: '1px solid #444' }}>
+              <h4 style={{ marginTop: '1rem', marginBottom: '0.5rem' }}>Debug Overlays</h4>
+              <label style={{ display: 'block', marginBottom: '0.25rem' }}>
+                <input
+                  type="checkbox"
+                  checked={debugEnabled}
+                  onChange={(e) => setDebugEnabled(e.target.checked)}
+                />
+                {' '}Tracking debug (D)
+              </label>
+              <label style={{ display: 'block', marginBottom: '0.25rem' }}>
+                <input
+                  type="checkbox"
+                  checked={perfVisible}
+                  onChange={(e) => setPerfVisible(e.target.checked)}
+                />
+                {' '}Performance (P)
+              </label>
+              <label style={{ display: 'block' }}>
+                <input
+                  type="checkbox"
+                  checked={stickFigureEnabled}
+                  onChange={(e) => setStickFigureEnabled(e.target.checked)}
+                />
+                {' '}Stick figure (S)
+              </label>
+            </div>
+
             {/* Hide Panel Button */}
             <div style={{ padding: '1rem', borderTop: '1px solid #444' }}>
               <button
@@ -348,7 +385,7 @@ function HomePageContent() {
                 Hide Panel (H)
               </button>
               <p style={{ fontSize: '0.75rem', color: '#888', marginTop: '0.5rem', textAlign: 'center' }}>
-                Move mouse to right edge to restore
+                Shortcuts: H panel · D debug · P perf · S stick
               </p>
             </div>
           </aside>
@@ -377,6 +414,9 @@ function HomePageContent() {
 
       {/* Debug overlay - toggle with 'D' key */}
       <TrackingDebugOverlay />
+
+      {/* Stick-figure debug overlay - toggle with 'S' key */}
+      <TrackingStickfigureOverlay vrm={vrm} />
 
       {/* Tracking status indicator */}
       {(isInitializing || isWaitingForVideo || trackingError) && (

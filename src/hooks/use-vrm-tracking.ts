@@ -13,7 +13,7 @@ import { solveHolistic, type HolisticResult } from '../lib/solver/holistic-solve
 import { isVideoReady, waitForVideoReady } from '../lib/capture/video-readiness'
 import { useTrackingStore, type PipelineState } from '../stores/tracking-store'
 import { trackingProfiler } from '../lib/perf/profiler-instances'
-import type { WorkerOutMessage } from '../lib/worker/protocol'
+import type { WorkerOutMessage, RawLandmarks } from '../lib/worker/protocol'
 
 export interface UseVRMTrackingOptions {
   /** The VRM model to animate */
@@ -102,8 +102,8 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
     errorMsg: string | null
   ) => {
     // Read fresh from store to avoid stale closure issues
-    const { debugEnabled, setDebugData } = useTrackingStore.getState()
-    if (!debugEnabled) return
+    const { debugEnabled, stickFigureEnabled, setDebugData } = useTrackingStore.getState()
+    if (!debugEnabled && !stickFigureEnabled) return
 
     // Extract raw pose landmarks for debugging IK
     const poseLandmarks = mediaPipeResult?.poseLandmarks?.[0]
@@ -113,6 +113,21 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
       leftWrist: poseLandmarks[15] ? { x: poseLandmarks[15].x, y: poseLandmarks[15].y, z: poseLandmarks[15].z } : undefined,
       rightWrist: poseLandmarks[16] ? { x: poseLandmarks[16].x, y: poseLandmarks[16].y, z: poseLandmarks[16].z } : undefined,
     } : undefined
+
+    // Stick-figure overlay needs full landmark snapshots + the bone rotations
+    // the bridge actually wrote, but only when its toggle is on (the data is
+    // bigger and unnecessary for the text-only debug HUD).
+    let rawLandmarks: RawLandmarks | undefined
+    if (stickFigureEnabled && mediaPipeResult) {
+      rawLandmarks = {}
+      if (mediaPipeResult.poseLandmarks?.[0]?.length) rawLandmarks.pose = mediaPipeResult.poseLandmarks[0]
+      if (mediaPipeResult.leftHandLandmarks?.[0]?.length) rawLandmarks.leftHand = mediaPipeResult.leftHandLandmarks[0]
+      if (mediaPipeResult.rightHandLandmarks?.[0]?.length) rawLandmarks.rightHand = mediaPipeResult.rightHandLandmarks[0]
+      if (mediaPipeResult.faceLandmarks?.[0]?.length) rawLandmarks.face = mediaPipeResult.faceLandmarks[0]
+    }
+    const appliedRotations = stickFigureEnabled
+      ? bridgeRef.current?.getAppliedRotations()
+      : undefined
 
     setDebugData({
       pipelineState,
@@ -125,6 +140,8 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
         poseLandmarkCount: mediaPipeResult?.poseLandmarks?.[0]?.length ?? 0,
       },
       rawPose,
+      rawLandmarks,
+      appliedRotations,
       solved,
       performance: {
         fps: elapsed > 0 ? 1000 / elapsed : 0,
@@ -135,17 +152,24 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
     })
   }, [])
 
-  // Simplified debug emit for worker mode (no raw landmarks available)
+  // Simplified debug emit for worker mode. Raw landmarks come from the worker
+  // message (only when stick-figure debug is on), so we accept them as an arg
+  // instead of recomputing.
   const emitWorkerDebugData = useCallback((
     pipelineState: PipelineState,
     solved: HolisticResult | null,
     detection: { hasFace: boolean; hasPose: boolean; hasLeftHand: boolean; hasRightHand: boolean; faceLandmarkCount: number; poseLandmarkCount: number } | null,
     elapsed: number,
     timestamp: number,
-    errorMsg: string | null
+    errorMsg: string | null,
+    rawLandmarks?: RawLandmarks,
   ) => {
-    const { debugEnabled, setDebugData } = useTrackingStore.getState()
-    if (!debugEnabled) return
+    const { debugEnabled, stickFigureEnabled, setDebugData } = useTrackingStore.getState()
+    if (!debugEnabled && !stickFigureEnabled) return
+
+    const appliedRotations = stickFigureEnabled
+      ? bridgeRef.current?.getAppliedRotations()
+      : undefined
 
     setDebugData({
       pipelineState,
@@ -154,6 +178,8 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
         faceLandmarkCount: 0, poseLandmarkCount: 0,
       },
       rawPose: undefined,
+      rawLandmarks: stickFigureEnabled ? rawLandmarks : undefined,
+      appliedRotations,
       solved,
       performance: {
         fps: elapsed > 0 ? 1000 / elapsed : 0,
@@ -306,13 +332,22 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
               trackingProfiler.begin('bridge')
               bridge.update(e.data.data)
               trackingProfiler.end('bridge')
-              emitWorkerDebugData('tracking', e.data.data, e.data.detection, 0, Date.now(), null)
+              emitWorkerDebugData(
+                'tracking',
+                e.data.data,
+                e.data.detection,
+                0,
+                Date.now(),
+                null,
+                e.data.rawLandmarks,
+              )
               workerBusyRef.current = false
             } else if (e.data.type === 'error') {
               console.warn('Worker frame error:', e.data.message)
               workerBusyRef.current = false
             }
           }
+
         }
 
         setIsWaitingForVideo(false)
@@ -358,6 +393,7 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
       })
     }
   }, [faceTracking, poseTracking, handTracking])
+
 
   const startTrackingLoop = useCallback(() => {
     function loop(timestamp: number) {

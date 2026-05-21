@@ -12,10 +12,25 @@ import {
 } from '@mediapipe/tasks-vision'
 import { solveHolistic } from '../solver/holistic-solver'
 import { WASM_BASE_PATH, HOLISTIC_MODEL_PATH, FACE_MODEL_PATH } from '../mediapipe/constants'
-import type { WorkerInMessage, WorkerOutMessage, WorkerDetectionInfo } from './protocol'
+import type {
+  WorkerInMessage,
+  WorkerOutMessage,
+  WorkerDetectionInfo,
+  RawLandmarks,
+} from './protocol'
 
 let holisticLandmarker: HolisticLandmarker | null = null
 let faceLandmarker: FaceLandmarker | null = null
+// Raw landmarks always travel back across the boundary. We previously gated
+// this on a "set-debug" toggle to save ~5 KB/frame, but the gate raced against
+// the main-thread effect that enabled it — silently starving the stick-figure
+// overlay of data. The bandwidth saving was negligible compared to the
+// ImageBitmap transfers happening anyway, so the gate was removed.
+// `setDebugEnabled` is retained as a no-op so the existing message handler in
+// the protocol keeps working without an API break.
+function setDebugEnabled(_enabled: boolean) {
+  // intentionally empty
+}
 
 function post(msg: WorkerOutMessage) {
   self.postMessage(msg)
@@ -61,7 +76,7 @@ async function handleInit(needsPose: boolean, needsHands: boolean) {
 function handleFrame(bitmap: ImageBitmap, timestamp: number) {
   try {
     let faceLandmarks: { x: number; y: number; z: number }[][] = []
-    let poseLandmarks: { x: number; y: number; z: number }[][] = []
+    let poseLandmarks: { x: number; y: number; z: number; visibility?: number }[][] = []
     let leftHandLandmarks: { x: number; y: number; z: number }[][] = []
     let rightHandLandmarks: { x: number; y: number; z: number }[][] = []
 
@@ -94,7 +109,20 @@ function handleFrame(bitmap: ImageBitmap, timestamp: number) {
       poseLandmarkCount: poseLandmarks[0]?.length ?? 0,
     }
 
-    post({ type: 'result', data: solved, detection })
+    const rawLandmarks: RawLandmarks = {}
+    if (poseLandmarks[0]?.length) rawLandmarks.pose = poseLandmarks[0]
+    if (leftHandLandmarks[0]?.length) rawLandmarks.leftHand = leftHandLandmarks[0]
+    if (rightHandLandmarks[0]?.length) rawLandmarks.rightHand = rightHandLandmarks[0]
+    if (faceLandmarks[0]?.length) rawLandmarks.face = faceLandmarks[0]
+
+    const message: WorkerOutMessage = {
+      type: 'result',
+      data: solved,
+      detection,
+      rawLandmarks,
+    }
+
+    post(message)
   } catch (err) {
     bitmap.close()
     post({ type: 'error', message: err instanceof Error ? err.message : String(err) })
@@ -102,7 +130,7 @@ function handleFrame(bitmap: ImageBitmap, timestamp: number) {
 }
 
 // Exported for unit testing
-export { handleInit, handleFrame }
+export { handleInit, handleFrame, setDebugEnabled }
 
 // Worker context setup
 if (typeof self !== 'undefined' && 'postMessage' in self) {
@@ -112,6 +140,8 @@ if (typeof self !== 'undefined' && 'postMessage' in self) {
       handleInit(msg.needsPose, msg.needsHands)
     } else if (msg.type === 'frame') {
       handleFrame(msg.bitmap, msg.timestamp)
+    } else if (msg.type === 'set-debug') {
+      setDebugEnabled(msg.enabled)
     }
   }
 }
