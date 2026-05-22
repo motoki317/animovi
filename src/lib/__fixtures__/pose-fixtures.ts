@@ -198,9 +198,10 @@ export const ELBOWS_BENT: PoseFixture = {
     rightWrist: { x: 0.35, y: 0.45, z: -0.20 },
   }),
   expected: {
-    // Combination of down rotation and elbow bend
-    leftArm: { shoulder: { x: 0.3, y: 0, z: 0.5 }, elbow: { x: -Math.PI / 2, y: 0, z: 0 } },
-    rightArm: { shoulder: { x: 0.3, y: 0, z: -0.5 }, elbow: { x: -Math.PI / 2, y: 0, z: 0 } },
+    // 3DOF decomposition: shoulder picks the hinge plane via roll, elbow is a
+    // pure 1DOF Y-axis hinge (mirrored sign across sides).
+    leftArm: { shoulder: { x: 0, y: -0.32, z: Math.PI / 2 }, elbow: { x: 0, y: -1.25, z: 0 } },
+    rightArm: { shoulder: { x: 0, y: 0.32, z: -Math.PI / 2 }, elbow: { x: 0, y: 1.25, z: 0 } },
   },
   rotationTolerance: 0.6,
 }

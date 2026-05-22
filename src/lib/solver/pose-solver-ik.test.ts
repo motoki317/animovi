@@ -187,13 +187,18 @@ describe('Pose Solver IK Integration Tests', () => {
   })
 
   describe('Elbow Bend', () => {
-    it('should detect elbow flexion', () => {
+    it('should detect elbow flexion as a 1DOF Y-axis hinge', () => {
       const result = solvePose(ELBOWS_BENT.landmarks)!
 
-      // Bent elbow = significant X rotation (flexion)
-      // Sign depends on Z convention; what matters is non-zero bend
-      expect(Math.abs(result.leftArm!.elbow.x)).toBeGreaterThan(0.3)
-      expect(Math.abs(result.rightArm!.elbow.x)).toBeGreaterThan(0.3)
+      // New decomposition: elbow flex is a pure rotation around the bone-local Y axis.
+      // Sign is mirrored across sides (left arm uses -Y hinge, right arm uses +Y).
+      expect(Math.abs(result.leftArm!.elbow.y)).toBeGreaterThan(0.3)
+      expect(Math.abs(result.rightArm!.elbow.y)).toBeGreaterThan(0.3)
+      // X and Z stay zero — no smearing across axes.
+      expect(Math.abs(result.leftArm!.elbow.x)).toBeLessThan(0.01)
+      expect(Math.abs(result.leftArm!.elbow.z)).toBeLessThan(0.01)
+      expect(Math.abs(result.rightArm!.elbow.x)).toBeLessThan(0.01)
+      expect(Math.abs(result.rightArm!.elbow.z)).toBeLessThan(0.01)
     })
   })
 
