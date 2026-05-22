@@ -108,6 +108,60 @@ describe('HandSolver', () => {
   })
 })
 
+describe('Finger curl with palm facing camera', () => {
+  // Regression: the old Y-axis-only metric returned ~0 for both extended and
+  // curled fingers when the palm faced the camera, because all curl motion was
+  // along Z. The 3D joint-angle metric must distinguish the two cases.
+
+  function makePalmAtCameraHand(curled: boolean): HandLandmarks {
+    const landmarks: HandLandmarks = []
+    landmarks[0] = { x: 0.5, y: 0.6, z: 0 } // wrist
+    // Thumb
+    landmarks[1] = { x: 0.4, y: 0.55, z: 0 }
+    landmarks[2] = { x: 0.35, y: 0.5, z: 0 }
+    landmarks[3] = { x: 0.32, y: 0.46, z: 0 }
+    landmarks[4] = { x: 0.3, y: 0.42, z: 0 }
+    // For each non-thumb finger, joints sit at the same X/Y when curled toward
+    // the palm (camera) — the curl is all along -Z.
+    const fingerXs = [0.42, 0.5, 0.58, 0.66]
+    const fingerNames = [5, 9, 13, 17] // MCP indices for index/middle/ring/pinky
+    for (let i = 0; i < 4; i++) {
+      const x = fingerXs[i]
+      const mcpIdx = fingerNames[i]
+      if (curled) {
+        // Curled toward palm: tip swings back along -Z and slightly back in Y
+        landmarks[mcpIdx] = { x, y: 0.5, z: 0 }
+        landmarks[mcpIdx + 1] = { x, y: 0.45, z: -0.03 }
+        landmarks[mcpIdx + 2] = { x, y: 0.47, z: -0.07 }
+        landmarks[mcpIdx + 3] = { x, y: 0.5, z: -0.08 }
+      } else {
+        // Extended straight up
+        landmarks[mcpIdx] = { x, y: 0.5, z: 0 }
+        landmarks[mcpIdx + 1] = { x, y: 0.42, z: 0 }
+        landmarks[mcpIdx + 2] = { x, y: 0.34, z: 0 }
+        landmarks[mcpIdx + 3] = { x, y: 0.26, z: 0 }
+      }
+    }
+    return landmarks
+  }
+
+  it('reports low curl for extended fingers with palm facing camera', () => {
+    const result = solveHand(makePalmAtCameraHand(false), 'left')!
+    expect(result.index.curl).toBeLessThan(0.15)
+    expect(result.middle.curl).toBeLessThan(0.15)
+    expect(result.ring.curl).toBeLessThan(0.15)
+    expect(result.pinky.curl).toBeLessThan(0.15)
+  })
+
+  it('reports high curl for curled fingers with palm facing camera', () => {
+    const result = solveHand(makePalmAtCameraHand(true), 'left')!
+    expect(result.index.curl).toBeGreaterThan(0.3)
+    expect(result.middle.curl).toBeGreaterThan(0.3)
+    expect(result.ring.curl).toBeGreaterThan(0.3)
+    expect(result.pinky.curl).toBeGreaterThan(0.3)
+  })
+})
+
 describe('Finger Spread', () => {
   it('should detect near-zero spread for parallel fingers', () => {
     const landmarks = createParallelFingerLandmarks()

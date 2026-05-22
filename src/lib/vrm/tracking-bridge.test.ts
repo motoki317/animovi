@@ -164,16 +164,29 @@ describe('TrackingBridge', () => {
     expect(mockVrm.humanoid.getNormalizedBoneNode).toHaveBeenCalled()
   })
 
-  it('should apply finger spread as Z rotation on proximal bones', () => {
-    const mockBones: Record<string, { rotation: { set: ReturnType<typeof vi.fn>; x: number; y: number; z: number } }> = {}
+  it('should apply finger spread as Y rotation on proximal bones', () => {
+    // Mock that records the values passed to rotation.set into x/y/z so tests
+    // can read them back (real three.js Euler does this internally).
+    function makeBone() {
+      const rotation = {
+        x: 0,
+        y: 0,
+        z: 0,
+        set: vi.fn(function (this: { x: number; y: number; z: number }, x: number, y: number, z: number) {
+          this.x = x
+          this.y = y
+          this.z = z
+        }),
+      }
+      return { rotation }
+    }
+    const mockBones: Record<string, ReturnType<typeof makeBone>> = {}
     const fingerNames = ['Thumb', 'Index', 'Middle', 'Ring', 'Pinky']
     for (const name of fingerNames) {
-      mockBones[`left${name}Proximal`] = {
-        rotation: { set: vi.fn(), x: 0, y: 0, z: 0 },
-      }
+      mockBones[`left${name}Proximal`] = makeBone()
     }
     mockVrm.humanoid.getNormalizedBoneNode = vi.fn().mockImplementation((name: string) => {
-      return mockBones[name] ?? { rotation: { set: vi.fn(), x: 0, y: 0, z: 0 } }
+      return mockBones[name] ?? makeBone()
     })
 
     const trackingResult: HolisticResult = {
@@ -191,13 +204,12 @@ describe('TrackingBridge', () => {
 
     bridge.update(trackingResult)
 
-    // Index finger should have non-zero Z rotation from spread
+    // Spread is now applied on Y (curl uses Z; the bone extends along ±X so
+    // X-rotation is a no-op against the rest pose).
     const indexBone = mockBones['leftIndexProximal']
-    expect(indexBone.rotation.z).not.toBe(0)
-
-    // Ring finger should have non-zero Z rotation from spread
+    expect(indexBone.rotation.y).not.toBe(0)
     const ringBone = mockBones['leftRingProximal']
-    expect(ringBone.rotation.z).not.toBe(0)
+    expect(ringBone.rotation.y).not.toBe(0)
   })
 
   it('should apply eye gaze to VRM eye bones', () => {
@@ -347,7 +359,18 @@ describe('TrackingBridge', () => {
       bridge.update({ face: null, pose: null, leftHand: null, rightHand: null })
 
       // Regain with different values
-      const mockBone = { rotation: { set: vi.fn(), x: 0, y: 0, z: 0 } }
+      const mockBone = {
+        rotation: {
+          x: 0,
+          y: 0,
+          z: 0,
+          set: vi.fn(function (this: { x: number; y: number; z: number }, x: number, y: number, z: number) {
+            this.x = x
+            this.y = y
+            this.z = z
+          }),
+        },
+      }
       mockVrm.humanoid.getNormalizedBoneNode = vi.fn().mockReturnValue(mockBone)
 
       const newHandResult: HolisticResult = {
@@ -363,9 +386,9 @@ describe('TrackingBridge', () => {
       }
       bridge.update(newHandResult)
 
-      // Curl should be close to 0.1 (snapped), not interpolated from 0.8
-      // The bone X rotation = curl * PI/2, so for 0.1 it's ~0.157
-      expect(mockBone.rotation.x).toBeCloseTo(0.1 * Math.PI / 2, 1)
+      // Curl now maps to Z (bone extends along X — see applyHandTracking comment).
+      // For left side, sign is +; |bone.rotation.z| = curl * π/2.
+      expect(Math.abs(mockBone.rotation.z)).toBeCloseTo(0.1 * Math.PI / 2, 1)
     })
   })
 

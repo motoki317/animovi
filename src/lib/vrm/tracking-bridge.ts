@@ -285,24 +285,44 @@ export class TrackingBridge {
     const prefix = side === 'left' ? 'left' : 'right'
     const fingerNames = ['thumb', 'index', 'middle', 'ring', 'pinky'] as const
 
+    // In three-vrm's normalized rig, finger bones extend along ±X (verified at
+    // startup via logFingerBoneAvailability). Rotating around bone-local X is a
+    // no-op — the bone IS along X. Curl/spread must rotate around the perpendicular
+    // axes:
+    //   curl   → Z (bends finger toward palm)
+    //   spread → Y (lateral splay in the palm plane)
+    // sideSign: left fingers extend in +X, right in -X; same curl angle requires
+    // opposite Z sign across hands. The existing boneSign (VRM-version
+    // compensator for arm bones) happens to give the correct world-direction
+    // mapping for this VRM's finger rest pose; combined with sideSign it
+    // produces a palms-down curl.
+    //
+    // Anatomical curl distributes across three joints (proximal, intermediate,
+    // distal) rather than concentrating on the proximal. Approximate weights
+    // chosen so curl=1 produces a roughly natural fist (~140° total bend).
+    const sideSign = side === 'left' ? 1 : -1
+    const jointWeights = [
+      { suffix: 'Proximal', curlFactor: 0.5, spreadFactor: 1 },
+      { suffix: 'Intermediate', curlFactor: 0.5, spreadFactor: 0 },
+      { suffix: 'Distal', curlFactor: 0.4, spreadFactor: 0 },
+    ] as const
+
     for (const finger of fingerNames) {
       const fingerData = hand[finger]
       if (!fingerData) continue
 
-      // Apply curl and spread to proximal bone
-      const boneName = `${prefix}${finger.charAt(0).toUpperCase()}${finger.slice(1)}Proximal`
-      const bone = this.vrm.humanoid.getNormalizedBoneNode(boneName as never)
-      if (bone) {
+      const capName = finger.charAt(0).toUpperCase() + finger.slice(1)
+      for (const { suffix, curlFactor, spreadFactor } of jointWeights) {
+        const boneName = `${prefix}${capName}${suffix}`
+        const bone = this.vrm.humanoid.getNormalizedBoneNode(boneName as never)
+        if (!bone) continue
         const curl = this.smoothValue(`${boneName}Curl`, fingerData.curl)
         const spread = this.smoothValue(`${boneName}Spread`, fingerData.spread)
-        // Curl is applied as X rotation (bending finger), max 90 degrees
-        const rx = this.boneSign * curl * Math.PI * 0.5
-        // Spread is applied as Z rotation (lateral splay), max ~30 degrees
-        const rz = this.boneSign * spread * Math.PI / 6
-        bone.rotation.x = rx
-        bone.rotation.z = rz
+        const rz = this.boneSign * sideSign * curl * Math.PI * curlFactor
+        const ry = this.boneSign * sideSign * spread * (Math.PI / 6) * spreadFactor
+        bone.rotation.set(0, ry, rz, 'ZYX')
         this.appliedRotations[boneName] = {
-          applied: { x: rx, y: 0, z: rz },
+          applied: { x: 0, y: ry, z: rz },
           raw: { x: fingerData.curl, y: 0, z: fingerData.spread },
         }
       }
