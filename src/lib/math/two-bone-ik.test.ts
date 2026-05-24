@@ -458,7 +458,7 @@ describe('clampArmRotation', () => {
     expect(result.elbow.x).toBeCloseTo(-0.8)
   })
 
-  it('should clamp shoulder X rotation to [-PI/2, PI]', () => {
+  it('should clamp shoulder X rotation to [-PI, PI]', () => {
     const result = clampArmRotation({
       shoulder: { x: 4, y: 0, z: 0 }, // > PI
       elbow: { x: 0, y: 0, z: 0 },
@@ -468,12 +468,12 @@ describe('clampArmRotation', () => {
     expect(result.shoulder.x).toBeLessThanOrEqual(Math.PI)
 
     const result2 = clampArmRotation({
-      shoulder: { x: -2, y: 0, z: 0 }, // < -PI/2
+      shoulder: { x: -4, y: 0, z: 0 }, // < -PI
       elbow: { x: 0, y: 0, z: 0 },
       reachable: true,
     })
 
-    expect(result2.shoulder.x).toBeGreaterThanOrEqual(-Math.PI / 2)
+    expect(result2.shoulder.x).toBeGreaterThanOrEqual(-Math.PI)
   })
 
   it('should clamp shoulder Z rotation to [-PI, PI]', () => {

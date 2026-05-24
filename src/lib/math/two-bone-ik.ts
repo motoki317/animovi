@@ -93,47 +93,6 @@ export interface DirectArmInput {
 }
 
 /**
- * Compute the rotation quaternion [qx, qy, qz, qw] that transforms 'from' direction to 'to' direction.
- * Returns the minimal-arc quaternion (shortest rotation).
- */
-function directionToQuaternion(from: Vector3, to: Vector3): [number, number, number, number] {
-  const fromNorm = normalize(from)
-  const toNorm = normalize(to)
-
-  if (length(fromNorm) < 0.001 || length(toNorm) < 0.001) {
-    return [0, 0, 0, 1]
-  }
-
-  const d = dot(fromNorm, toNorm)
-  const c = cross(fromNorm, toNorm)
-  const crossLen = length(c)
-
-  if (crossLen < 0.001) {
-    return d > 0 ? [0, 0, 0, 1] : [0, 1, 0, 0]
-  }
-
-  const axis = normalize(c)
-  const angle = Math.acos(clamp(d, -1, 1))
-  const ha = angle / 2
-  return [axis.x * Math.sin(ha), axis.y * Math.sin(ha), axis.z * Math.sin(ha), Math.cos(ha)]
-}
-
-/**
- * Rotate a vector by a quaternion: v' = q * v * q⁻¹
- * Uses the optimized formula: v' = v + 2w(q×v) + 2(q×(q×v))
- */
-function rotateByQuaternion(v: Vector3, qx: number, qy: number, qz: number, qw: number): Vector3 {
-  const cx = qy * v.z - qz * v.y
-  const cy = qz * v.x - qx * v.z
-  const cz = qx * v.y - qy * v.x
-  return {
-    x: v.x + 2 * (qw * cx + qy * cz - qz * cy),
-    y: v.y + 2 * (qw * cy + qz * cx - qx * cz),
-    z: v.z + 2 * (qw * cz + qx * cy - qy * cx),
-  }
-}
-
-/**
  * Convert a direction vector to ZYX Euler angles.
  * Computes the rotation that transforms 'from' direction to 'to' direction.
  */
@@ -185,51 +144,162 @@ function directionToEulerZYX(from: Vector3, to: Vector3): { x: number; y: number
 }
 
 /**
- * Solve arm rotations directly from landmarks (KalidoKit-style).
+ * Build a rotation quaternion from two pairs of vectors:
+ *   R · uLocal = uWorld
+ *   R · nLocal = nWorld
+ * The two pairs must satisfy uLocal ⊥ nLocal and uWorld ⊥ nWorld
+ * (and matching handedness). Returns [qx, qy, qz, qw].
+ */
+export function rotationFromTwoPairs(
+  uLocal: Vector3,
+  nLocal: Vector3,
+  uWorld: Vector3,
+  nWorld: Vector3
+): [number, number, number, number] {
+  // Build orthonormal local frame columns (uL, nL, uL × nL)
+  const tLocal = cross(uLocal, nLocal)
+  const tWorld = cross(uWorld, nWorld)
+
+  // R · localFrame = worldFrame  =>  R = worldFrame · localFrame⁻¹
+  // localFrame and worldFrame are orthogonal matrices, so inverse = transpose.
+  // R[i][j] = Σ_k worldFrame[i][k] · localFrame[j][k]
+  //        = uWorld[i]·uLocal[j] + nWorld[i]·nLocal[j] + tWorld[i]·tLocal[j]
+  const m00 = uWorld.x * uLocal.x + nWorld.x * nLocal.x + tWorld.x * tLocal.x
+  const m01 = uWorld.x * uLocal.y + nWorld.x * nLocal.y + tWorld.x * tLocal.y
+  const m02 = uWorld.x * uLocal.z + nWorld.x * nLocal.z + tWorld.x * tLocal.z
+  const m10 = uWorld.y * uLocal.x + nWorld.y * nLocal.x + tWorld.y * tLocal.x
+  const m11 = uWorld.y * uLocal.y + nWorld.y * nLocal.y + tWorld.y * tLocal.y
+  const m12 = uWorld.y * uLocal.z + nWorld.y * nLocal.z + tWorld.y * tLocal.z
+  const m20 = uWorld.z * uLocal.x + nWorld.z * nLocal.x + tWorld.z * tLocal.x
+  const m21 = uWorld.z * uLocal.y + nWorld.z * nLocal.y + tWorld.z * tLocal.y
+  const m22 = uWorld.z * uLocal.z + nWorld.z * nLocal.z + tWorld.z * tLocal.z
+
+  // Matrix → quaternion (Shepperd / Shoemake; pick largest diagonal for stability)
+  const trace = m00 + m11 + m22
+  let qx: number, qy: number, qz: number, qw: number
+  if (trace > 0) {
+    const s = Math.sqrt(trace + 1) * 2
+    qw = 0.25 * s
+    qx = (m21 - m12) / s
+    qy = (m02 - m20) / s
+    qz = (m10 - m01) / s
+  } else if (m00 > m11 && m00 > m22) {
+    const s = Math.sqrt(1 + m00 - m11 - m22) * 2
+    qw = (m21 - m12) / s
+    qx = 0.25 * s
+    qy = (m01 + m10) / s
+    qz = (m02 + m20) / s
+  } else if (m11 > m22) {
+    const s = Math.sqrt(1 + m11 - m00 - m22) * 2
+    qw = (m02 - m20) / s
+    qx = (m01 + m10) / s
+    qy = 0.25 * s
+    qz = (m12 + m21) / s
+  } else {
+    const s = Math.sqrt(1 + m22 - m00 - m11) * 2
+    qw = (m10 - m01) / s
+    qx = (m02 + m20) / s
+    qy = (m12 + m21) / s
+    qz = 0.25 * s
+  }
+  return [qx, qy, qz, qw]
+}
+
+/** Convert a unit quaternion to ZYX Euler (Three.js order 'ZYX'). */
+export function quaternionToEulerZYX(q: [number, number, number, number]): { x: number; y: number; z: number } {
+  const [qx, qy, qz, qw] = q
+  const sinY = 2 * (qw * qy - qx * qz)
+  if (Math.abs(sinY) >= 0.9999999) {
+    return {
+      x: 0,
+      y: (Math.PI / 2) * Math.sign(sinY),
+      z: Math.atan2(-(2 * (qx * qy - qw * qz)), 1 - 2 * (qx * qx + qz * qz)),
+    }
+  }
+  return {
+    x: Math.atan2(2 * (qw * qx + qy * qz), 1 - 2 * (qx * qx + qy * qy)),
+    y: Math.asin(sinY),
+    z: Math.atan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz)),
+  }
+}
+
+/**
+ * Solve arm rotations from landmark positions (KalidoKit-style 3DOF decomposition).
  *
- * Unlike the IK solver which targets a wrist position, this directly uses
- * the detected landmark positions to compute rotations.
+ * Decomposition:
+ *   - Shoulder = full 3DOF rotation: aligns the bone axis to shoulder→elbow,
+ *     AND rolls the bone so the elbow's natural hinge axis points toward
+ *     normalize(upper × forearm) in world space.
+ *   - Elbow = pure 1DOF hinge around the bone-local Y axis (matches three-vrm
+ *     normalized humanoid rest convention), magnitude = angle(upper, forearm).
+ *
+ * This recovers the upper-arm roll DOF that the old minimal-arc decomposition
+ * threw away, and confines the elbow to a true hinge rather than smearing
+ * the bend across three Euler axes.
  */
 export function solveArmDirect(input: DirectArmInput): TwoBoneIKResult {
   const { shoulder, elbow, wrist, isLeft } = input
 
-  // T-pose direction
   const tposeDir: Vector3 = isLeft ? { x: -1, y: 0, z: 0 } : { x: 1, y: 0, z: 0 }
+  // Hinge axis in upper-arm-local frame. Mirrored across sides so symmetric
+  // poses produce mirrored Eulers without a phantom 180° upper-arm twist.
+  const hingeLocal: Vector3 = isLeft ? { x: 0, y: -1, z: 0 } : { x: 0, y: 1, z: 0 }
 
-  // Upper arm direction: shoulder → elbow
   const upperArmDir = sub(elbow, shoulder)
-
-  // Compute shoulder rotation: T-pose → upper arm direction
-  const shoulderRot = directionToEulerZYX(tposeDir, upperArmDir)
-
-  // Lower arm direction: elbow → wrist
-  const lowerArmDir = sub(wrist, elbow)
-
-  // Elbow rotation in the upper arm bone's LOCAL space.
-  //
-  // The VRM bone hierarchy applies: worldDir = R_shoulder * R_elbow * tposeDir
-  // So the elbow rotation must transform the T-pose direction to the lower arm's
-  // direction as seen from the upper arm's local frame.
-  //
-  // To get the lower arm direction in parent-local space:
-  //   localLowerArmDir = R_shoulder⁻¹ * lowerArmDir
+  const forearmDir = sub(wrist, elbow)
   const upperLen = length(upperArmDir)
-  const lowerLen = length(lowerArmDir)
+  const forearmLen = length(forearmDir)
 
-  let elbowRot = { x: 0, y: 0, z: 0 }
-  if (upperLen > 0.001 && lowerLen > 0.001) {
-    // Get shoulder rotation as quaternion
-    const [sqx, sqy, sqz, sqw] = directionToQuaternion(tposeDir, upperArmDir)
-    // Transform lowerArmDir to upper arm's local space (inverse quaternion = conjugate)
-    const localLowerArmDir = rotateByQuaternion(lowerArmDir, -sqx, -sqy, -sqz, sqw)
-    // Compute elbow rotation from T-pose direction to local lower arm direction
-    elbowRot = directionToEulerZYX(tposeDir, localLowerArmDir)
+  if (upperLen < 0.001) {
+    return { shoulder: { x: 0, y: 0, z: 0 }, elbow: { x: 0, y: 0, z: 0 }, reachable: true }
   }
 
+  const u = normalize(upperArmDir)
+
+  if (forearmLen < 0.001) {
+    // No forearm info — fall back to 2DOF minimal-arc shoulder.
+    return {
+      shoulder: directionToEulerZYX(tposeDir, u),
+      elbow: { x: 0, y: 0, z: 0 },
+      reachable: true,
+    }
+  }
+
+  const f = normalize(forearmDir)
+  const cosBend = clamp(dot(u, f), -1, 1)
+  const bendAngle = Math.acos(cosBend)
+
+  const hingeWorld = cross(u, f)
+  const hingeLen = length(hingeWorld)
+
+  if (hingeLen < 0.01) {
+    // Arm is (nearly) straight — no hinge plane defined; roll is ambiguous.
+    // Use 2DOF minimal-arc and zero elbow flex.
+    return {
+      shoulder: directionToEulerZYX(tposeDir, u),
+      elbow: { x: 0, y: 0, z: 0 },
+      reachable: true,
+    }
+  }
+
+  const nWorld: Vector3 = {
+    x: hingeWorld.x / hingeLen,
+    y: hingeWorld.y / hingeLen,
+    z: hingeWorld.z / hingeLen,
+  }
+
+  const shoulderQuat = rotationFromTwoPairs(tposeDir, hingeLocal, u, nWorld)
+  const shoulderEuler = quaternionToEulerZYX(shoulderQuat)
+
+  // R_elbow = rotation by +bendAngle around hingeLocal.
+  // hingeLocal points along ±Y, so this is a pure Y-axis rotation; the sign is
+  // negative when hingeLocal = -Y (left arm), positive when +Y (right arm).
+  const elbowY = isLeft ? -bendAngle : bendAngle
+
   return {
-    shoulder: shoulderRot,
-    elbow: elbowRot,
-    reachable: true, // Always "reachable" since we use actual positions
+    shoulder: shoulderEuler,
+    elbow: { x: 0, y: elbowY, z: 0 },
+    reachable: true,
   }
 }
 
@@ -240,7 +310,10 @@ export function solveArmDirect(input: DirectArmInput): TwoBoneIKResult {
 export function clampArmRotation(result: TwoBoneIKResult): TwoBoneIKResult {
   return {
     shoulder: {
-      x: clamp(result.shoulder.x, -Math.PI / 2, Math.PI),
+      // Symmetric clamp — shoulder.x is now bone roll (around bone axis), which
+      // is naturally signed. The old asymmetric [-π/2, π] reflected an anatomical
+      // pitch interpretation that no longer applies after the 3DOF decomposition.
+      x: clamp(result.shoulder.x, -Math.PI, Math.PI),
       y: clamp(result.shoulder.y, -Math.PI, Math.PI),
       z: clamp(result.shoulder.z, -Math.PI, Math.PI),
     },
