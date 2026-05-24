@@ -150,7 +150,7 @@ function directionToEulerZYX(from: Vector3, to: Vector3): { x: number; y: number
  * The two pairs must satisfy uLocal ⊥ nLocal and uWorld ⊥ nWorld
  * (and matching handedness). Returns [qx, qy, qz, qw].
  */
-function rotationFromTwoPairs(
+export function rotationFromTwoPairs(
   uLocal: Vector3,
   nLocal: Vector3,
   uWorld: Vector3,
@@ -206,7 +206,7 @@ function rotationFromTwoPairs(
 }
 
 /** Convert a unit quaternion to ZYX Euler (Three.js order 'ZYX'). */
-function quaternionToEulerZYX(q: [number, number, number, number]): { x: number; y: number; z: number } {
+export function quaternionToEulerZYX(q: [number, number, number, number]): { x: number; y: number; z: number } {
   const [qx, qy, qz, qw] = q
   const sinY = 2 * (qw * qy - qx * qz)
   if (Math.abs(sinY) >= 0.9999999) {

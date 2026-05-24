@@ -154,6 +154,7 @@ describe('TrackingBridge', () => {
         middle: { curl: 0.4, spread: 0 },
         ring: { curl: 0.35, spread: 0 },
         pinky: { curl: 0.3, spread: 0 },
+        wristFrame: null,
       },
       rightHand: null,
     }
@@ -162,6 +163,130 @@ describe('TrackingBridge', () => {
 
     // Should call for finger bones
     expect(mockVrm.humanoid.getNormalizedBoneNode).toHaveBeenCalled()
+  })
+
+  describe('Wrist rotation', () => {
+    function makeBone() {
+      const rotation = {
+        x: 0,
+        y: 0,
+        z: 0,
+        set: vi.fn(function (this: { x: number; y: number; z: number }, x: number, y: number, z: number) {
+          this.x = x
+          this.y = y
+          this.z = z
+        }),
+      }
+      return { rotation }
+    }
+
+    const tposeArm = {
+      shoulder: { x: 0, y: 0, z: 0 },
+      elbow: { x: 0, y: 0, z: 0 },
+    }
+    const palmToCameraFrame = {
+      handAxis: { x: -1, y: 0, z: 0 },  // left hand extends -X solver
+      palmNormal: { x: 0, y: 0, z: -1 }, // palm-to-camera = -Z solver
+    }
+
+    it('writes leftHand bone rotation when wrist frame is present', () => {
+      const mockBones: Record<string, ReturnType<typeof makeBone>> = {}
+      mockBones.leftHand = makeBone()
+      mockVrm.humanoid.getNormalizedBoneNode = vi.fn().mockImplementation((name: string) => {
+        return mockBones[name] ?? makeBone()
+      })
+
+      const trackingResult: HolisticResult = {
+        face: null,
+        pose: {
+          spine: { pitch: 0, yaw: 0, roll: 0 },
+          leftArm: tposeArm,
+          rightArm: null,
+        },
+        leftHand: {
+          thumb: { curl: 0, spread: 0 },
+          index: { curl: 0, spread: 0 },
+          middle: { curl: 0, spread: 0 },
+          ring: { curl: 0, spread: 0 },
+          pinky: { curl: 0, spread: 0 },
+          wristFrame: palmToCameraFrame,
+        },
+        rightHand: null,
+      }
+
+      bridge.update(trackingResult)
+
+      expect(mockVrm.humanoid.getNormalizedBoneNode).toHaveBeenCalledWith('leftHand')
+      expect(mockBones.leftHand.rotation.set).toHaveBeenCalled()
+    })
+
+    it('does not write leftHand bone rotation when wrist frame is null', () => {
+      const mockBones: Record<string, ReturnType<typeof makeBone>> = {}
+      mockBones.leftHand = makeBone()
+      mockVrm.humanoid.getNormalizedBoneNode = vi.fn().mockImplementation((name: string) => {
+        return mockBones[name] ?? makeBone()
+      })
+
+      const trackingResult: HolisticResult = {
+        face: null,
+        pose: {
+          spine: { pitch: 0, yaw: 0, roll: 0 },
+          leftArm: tposeArm,
+          rightArm: null,
+        },
+        leftHand: {
+          thumb: { curl: 0, spread: 0 },
+          index: { curl: 0, spread: 0 },
+          middle: { curl: 0, spread: 0 },
+          ring: { curl: 0, spread: 0 },
+          pinky: { curl: 0, spread: 0 },
+          wristFrame: null,
+        },
+        rightHand: null,
+      }
+
+      bridge.update(trackingResult)
+
+      // The hand bone should not be touched when wrist frame is null.
+      expect(mockBones.leftHand.rotation.set).not.toHaveBeenCalled()
+    })
+
+    it('produces a non-trivial Euler when palm orientation differs from rest', () => {
+      const mockBones: Record<string, ReturnType<typeof makeBone>> = {}
+      mockBones.leftHand = makeBone()
+      mockVrm.humanoid.getNormalizedBoneNode = vi.fn().mockImplementation((name: string) => {
+        return mockBones[name] ?? makeBone()
+      })
+
+      const trackingResult: HolisticResult = {
+        face: null,
+        pose: {
+          spine: { pitch: 0, yaw: 0, roll: 0 },
+          leftArm: tposeArm,
+          rightArm: null,
+        },
+        leftHand: {
+          thumb: { curl: 0, spread: 0 },
+          index: { curl: 0, spread: 0 },
+          middle: { curl: 0, spread: 0 },
+          ring: { curl: 0, spread: 0 },
+          pinky: { curl: 0, spread: 0 },
+          // Palm rotated 90° from rest (palm-up instead of palm-down)
+          wristFrame: {
+            handAxis: { x: -1, y: 0, z: 0 },
+            palmNormal: { x: 0, y: 1, z: 0 }, // palm-up = opposite of rest -Y
+          },
+        },
+        rightHand: null,
+      }
+
+      bridge.update(trackingResult)
+
+      // The bone should have a non-trivial rotation when palm is flipped from rest.
+      const rot = mockBones.leftHand.rotation
+      const totalMag = Math.abs(rot.x) + Math.abs(rot.y) + Math.abs(rot.z)
+      expect(totalMag).toBeGreaterThan(0.5)
+    })
   })
 
   it('should apply finger spread as Y rotation on proximal bones', () => {

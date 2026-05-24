@@ -17,12 +17,35 @@ export interface FingerRotation {
   spread: number // lateral spread from center
 }
 
+/**
+ * Detected hand orientation in solver world space.
+ *
+ * Two unit vectors — the hand's long axis (wrist→middleMCP) and the palm
+ * normal (cross of two finger spans, sign-corrected per side) — together
+ * fully determine the hand's 3D orientation. The bridge composes these with
+ * the arm chain (shoulder + elbow Eulers) to derive the wrist bone's local
+ * Euler via `R_handLocal = R_chain⁻¹ · R_target`.
+ *
+ * Using two axes (rather than just palm normal) is essential: a single-axis
+ * approach is degenerate when palm normal aligns with the forearm — exactly
+ * the case for "reaching forward, palm facing camera".
+ */
+export interface WristFrame {
+  /** Hand's extending direction in solver space, unit vector. */
+  handAxis: V3
+  /** Palm normal in solver space (out of palm), unit vector. */
+  palmNormal: V3
+}
+
 export interface HandResult {
   thumb: FingerRotation
   index: FingerRotation
   middle: FingerRotation
   ring: FingerRotation
   pinky: FingerRotation
+  /** Detected hand orientation (hand axis + palm normal). Null when the
+   * landmark geometry is degenerate. */
+  wristFrame: WristFrame | null
 }
 
 // Finger landmark indices (MediaPipe Hand)
@@ -77,6 +100,91 @@ function clamp01(v: number): number {
   return Math.max(0, Math.min(1, v))
 }
 
+function vscale(v: V3, s: number): V3 {
+  return { x: v.x * s, y: v.y * s, z: v.z * s }
+}
+
+export type Quat = [number, number, number, number] // [x, y, z, w]
+
+/**
+ * Three.js Euler('ZYX') → quaternion. Composition is qz · qy · qx (X applied
+ * first, then Y, then Z), matching how three.js evaluates ZYX-order Eulers.
+ */
+export function eulerZYXToQuat(e: { x: number; y: number; z: number }): Quat {
+  const cx = Math.cos(e.x * 0.5), sx = Math.sin(e.x * 0.5)
+  const cy = Math.cos(e.y * 0.5), sy = Math.sin(e.y * 0.5)
+  const cz = Math.cos(e.z * 0.5), sz = Math.sin(e.z * 0.5)
+  return [
+    sx * cy * cz - cx * sy * sz,
+    cx * sy * cz + sx * cy * sz,
+    -sx * sy * cz + cx * cy * sz,
+    cx * cy * cz + sx * sy * sz,
+  ]
+}
+
+export function quatMul(a: Quat, b: Quat): Quat {
+  return [
+    a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+    a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+    a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+    a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2],
+  ]
+}
+
+export function rotateVecByQuat(v: V3, q: Quat): V3 {
+  const qx = q[0], qy = q[1], qz = q[2], qw = q[3]
+  // v_rotated = v + 2 * qw * (q.xyz × v) + 2 * (q.xyz × (q.xyz × v))
+  const tx = 2 * (qy * v.z - qz * v.y)
+  const ty = 2 * (qz * v.x - qx * v.z)
+  const tz = 2 * (qx * v.y - qy * v.x)
+  return {
+    x: v.x + qw * tx + (qy * tz - qz * ty),
+    y: v.y + qw * ty + (qz * tx - qx * tz),
+    z: v.z + qw * tz + (qx * ty - qy * tx),
+  }
+}
+
+/**
+ * MediaPipe Hand/Pose landmarks → VRM solver space.
+ * Mirrors the same transform used by pose-solver.ts:toVRMSpace so the wrist
+ * rotation we produce shares the sign convention of the arm Eulers.
+ */
+function toVRMPoint(p: { x: number; y: number; z: number }): V3 {
+  return { x: -(p.x - 0.5), y: -p.y, z: p.z }
+}
+
+/** Same axis flips as toVRMPoint but for a direction vector (no recentering). */
+function toVRMDir(d: { x: number; y: number; z: number }): V3 {
+  return { x: -d.x, y: -d.y, z: d.z }
+}
+
+/**
+ * Build the hand's orientation frame (handAxis, palmNormal) in solver space.
+ * Returns null when landmark geometry is degenerate. The bridge consumes this
+ * frame and the arm chain to compute the wrist bone's local Euler.
+ */
+function calculateWristFrame(landmarks: HandLandmarks, side: HandSide): WristFrame | null {
+  const wrist = toVRMPoint(landmarks[0])
+  const indexMCP = toVRMPoint(landmarks[FINGER_INDICES.index[0]])
+  const middleMCP = toVRMPoint(landmarks[FINGER_INDICES.middle[0]])
+  const pinkyMCP = toVRMPoint(landmarks[FINGER_INDICES.pinky[0]])
+
+  const handAxisRaw = sub(middleMCP, wrist)
+  if (vlen(handAxisRaw) < 1e-6) return null
+  const handAxis = vnorm(handAxisRaw)
+
+  // Cross product chirality: for LEFT hand, cross(wrist→index, wrist→pinky)
+  // post-toVRMSpace points along the BACK-of-hand normal — flip to get palm
+  // out-direction. For RIGHT hand the mirrored geometry gives palm normal
+  // directly. (Verified by stepping through a "palm facing camera" pose.)
+  const rawNormal = vcross(sub(indexMCP, wrist), sub(pinkyMCP, wrist))
+  const sideSign = side === 'left' ? -1 : 1
+  const palmNormal = vnorm(vscale(rawNormal, sideSign))
+  if (vlen(palmNormal) < 1e-6) return null
+
+  return { handAxis, palmNormal }
+}
+
 /**
  * 3D finger curl: sum of joint bend angles, normalized to [0, 1].
  * Replaces the old Y-axis-only metric, which degenerated to ~0 whenever the
@@ -129,7 +237,7 @@ function calculateFingerSpreads(landmarks: HandLandmarks): Record<string, number
   return result
 }
 
-export function solveHand(landmarks: HandLandmarks, _side: HandSide): HandResult | null {
+export function solveHand(landmarks: HandLandmarks, side: HandSide): HandResult | null {
   if (landmarks.length === 0) {
     return null
   }
@@ -143,5 +251,6 @@ export function solveHand(landmarks: HandLandmarks, _side: HandSide): HandResult
     middle: { curl: calculateFingerCurl(landmarks, FINGER_INDICES.middle), spread: spreads.middle },
     ring: { curl: calculateFingerCurl(landmarks, FINGER_INDICES.ring), spread: spreads.ring },
     pinky: { curl: calculateFingerCurl(landmarks, FINGER_INDICES.pinky), spread: spreads.pinky },
+    wristFrame: calculateWristFrame(landmarks, side),
   }
 }

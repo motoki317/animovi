@@ -6,8 +6,10 @@
 import type { VRM } from '@pixiv/three-vrm'
 import type { HolisticResult } from '../solver/holistic-solver'
 import type { FaceResult } from '../solver/face-solver'
-import type { PoseResult } from '../solver/pose-solver'
-import type { HandResult } from '../solver/hand-solver'
+import type { PoseResult, ArmResult } from '../solver/pose-solver'
+import type { HandResult, WristFrame } from '../solver/hand-solver'
+import { eulerZYXToQuat, quatMul, type Quat } from '../solver/hand-solver'
+import { rotationFromTwoPairs, quaternionToEulerZYX } from '../math/two-bone-ik'
 import { KalmanFilter } from '../math/kalman-filter'
 
 export interface TrackingBridgeOptions {
@@ -127,6 +129,9 @@ export class TrackingBridge {
       if (results.leftHand) {
         this.prevLeftHandActive = true
         this.applyHandTracking('left', results.leftHand)
+        if (results.leftHand.wristFrame && results.pose?.leftArm) {
+          this.applyWristTracking('left', results.leftHand.wristFrame, results.pose.leftArm)
+        }
       } else if (this.prevLeftHandActive) {
         this.prevLeftHandActive = false
         this.resetFiltersWithPrefix('left')
@@ -134,6 +139,9 @@ export class TrackingBridge {
       if (results.rightHand) {
         this.prevRightHandActive = true
         this.applyHandTracking('right', results.rightHand)
+        if (results.rightHand.wristFrame && results.pose?.rightArm) {
+          this.applyWristTracking('right', results.rightHand.wristFrame, results.pose.rightArm)
+        }
       } else if (this.prevRightHandActive) {
         this.prevRightHandActive = false
         this.resetFiltersWithPrefix('right')
@@ -326,6 +334,69 @@ export class TrackingBridge {
           raw: { x: fingerData.curl, y: 0, z: fingerData.spread },
         }
       }
+    }
+  }
+
+  /**
+   * Apply wrist rotation by composing the hand's detected world frame against
+   * the arm chain (shoulder + elbow Eulers).
+   *
+   * Algorithm:
+   *   1. Bone-local rest axes in SOLVER basis at T-pose:
+   *      - handAxis: ∓X (LEFT → -X, RIGHT → +X) — bone's extending direction.
+   *      - palmNormal: -Y (palms-down rest, matching this VRM rig's convention).
+   *   2. R_target = rotationFromTwoPairs(rest axes, detected axes) — the rotation
+   *      in solver basis that maps the bone-local rest hand frame to the
+   *      detected hand frame.
+   *   3. R_handLocal = R_chain⁻¹ · R_target — the bone's LOCAL rotation in solver
+   *      convention, given the parent (lowerArm) world rotation R_chain.
+   *   4. Convert R_handLocal to ZYX Euler; bridge applies boneSign on X/Z just
+   *      like the arm bones.
+   *
+   * This uses TWO orientation axes from the hand (axis + palm normal), so it
+   * stays well-defined even when the palm normal aligns with the forearm — the
+   * case where the previous single-axis approach went degenerate.
+   */
+  private applyWristTracking(
+    side: 'left' | 'right',
+    wristFrame: WristFrame,
+    arm: ArmResult,
+  ): void {
+    const boneName = side === 'left' ? 'leftHand' : 'rightHand'
+    const bone = this.vrm.humanoid.getNormalizedBoneNode(boneName as never)
+    if (!bone) return
+
+    const restHandAxis = side === 'left'
+      ? { x: -1, y: 0, z: 0 }
+      : { x: 1, y: 0, z: 0 }
+    const restPalmNormal = { x: 0, y: -1, z: 0 }
+
+    const qTarget = rotationFromTwoPairs(
+      restHandAxis,
+      restPalmNormal,
+      wristFrame.handAxis,
+      wristFrame.palmNormal,
+    )
+
+    const qShoulder = eulerZYXToQuat(arm.shoulder)
+    const qElbow = eulerZYXToQuat(arm.elbow)
+    const qChain = quatMul(qShoulder, qElbow)
+    const qChainInv: Quat = [-qChain[0], -qChain[1], -qChain[2], qChain[3]]
+    const qHandLocal = quatMul(qChainInv, qTarget)
+
+    const eulerSolver = quaternionToEulerZYX(qHandLocal)
+
+    const smoothedX = this.smoothValue(`${boneName}_x`, eulerSolver.x)
+    const smoothedY = this.smoothValue(`${boneName}_y`, eulerSolver.y)
+    const smoothedZ = this.smoothValue(`${boneName}_z`, eulerSolver.z)
+
+    const x = this.boneSign * smoothedX
+    const y = smoothedY
+    const z = this.boneSign * smoothedZ
+    bone.rotation.set(x, y, z, 'ZYX')
+    this.appliedRotations[boneName] = {
+      applied: { x, y, z },
+      raw: { x: eulerSolver.x, y: eulerSolver.y, z: eulerSolver.z },
     }
   }
 
