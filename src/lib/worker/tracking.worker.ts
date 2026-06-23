@@ -77,6 +77,8 @@ function handleFrame(bitmap: ImageBitmap, timestamp: number) {
   try {
     let faceLandmarks: { x: number; y: number; z: number }[][] = []
     let poseLandmarks: { x: number; y: number; z: number; visibility?: number }[][] = []
+    // Metric 3D pose landmarks; used by the solver for a stable spine yaw.
+    let poseWorldLandmarks: { x: number; y: number; z: number; visibility?: number }[][] = []
     let leftHandLandmarks: { x: number; y: number; z: number }[][] = []
     let rightHandLandmarks: { x: number; y: number; z: number }[][] = []
 
@@ -84,6 +86,7 @@ function handleFrame(bitmap: ImageBitmap, timestamp: number) {
       const result = holisticLandmarker.detectForVideo(bitmap, timestamp)
       faceLandmarks = result.faceLandmarks
       poseLandmarks = result.poseLandmarks
+      poseWorldLandmarks = result.poseWorldLandmarks ?? []
       leftHandLandmarks = result.leftHandLandmarks
       rightHandLandmarks = result.rightHandLandmarks
     } else if (faceLandmarker) {
@@ -96,6 +99,7 @@ function handleFrame(bitmap: ImageBitmap, timestamp: number) {
     const solved = solveHolistic({
       face: faceLandmarks[0] ?? [],
       pose: poseLandmarks[0] ?? [],
+      poseWorld: poseWorldLandmarks[0] ?? [],
       leftHand: leftHandLandmarks[0] ?? [],
       rightHand: rightHandLandmarks[0] ?? [],
     })

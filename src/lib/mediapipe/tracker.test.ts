@@ -124,6 +124,7 @@ describe('MediaPipeTracker', () => {
       expect(results).toEqual({
         faceLandmarks: [[{ x: 0.5, y: 0.5, z: 0 }]],
         poseLandmarks: [],
+        poseWorldLandmarks: [],
         leftHandLandmarks: [],
         rightHandLandmarks: [],
       })

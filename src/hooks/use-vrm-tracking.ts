@@ -469,6 +469,7 @@ export function useVRMTracking(options: UseVRMTrackingOptions): UseVRMTrackingRe
           const result = solveHolistic({
             face: mediaPipeResult.faceLandmarks?.[0] ?? [],
             pose: mediaPipeResult.poseLandmarks?.[0] ?? [],
+            poseWorld: mediaPipeResult.poseWorldLandmarks?.[0] ?? [],
             leftHand: mediaPipeResult.leftHandLandmarks?.[0] ?? [],
             rightHand: mediaPipeResult.rightHandLandmarks?.[0] ?? [],
           })

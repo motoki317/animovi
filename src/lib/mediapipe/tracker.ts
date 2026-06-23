@@ -16,6 +16,7 @@ import { WASM_BASE_PATH, HOLISTIC_MODEL_PATH, FACE_MODEL_PATH } from './constant
 export interface TrackerResult {
   faceLandmarks: { x: number; y: number; z: number }[][]
   poseLandmarks: { x: number; y: number; z: number }[][]
+  poseWorldLandmarks?: { x: number; y: number; z: number }[][]
   leftHandLandmarks: { x: number; y: number; z: number }[][]
   rightHandLandmarks: { x: number; y: number; z: number }[][]
 }
@@ -132,6 +133,7 @@ export class MediaPipeTracker {
         return {
           faceLandmarks: result.faceLandmarks,
           poseLandmarks: [],
+          poseWorldLandmarks: [],
           leftHandLandmarks: [],
           rightHandLandmarks: [],
         }

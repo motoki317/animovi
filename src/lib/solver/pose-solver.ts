@@ -43,6 +43,21 @@ const LEFT_HIP = 23
 const RIGHT_HIP = 24
 const VISIBILITY_THRESHOLD = 0.5
 
+// Spine-yaw tuning, calibrated against real footage (.local/test.mp4).
+// GAIN attenuates the detected shoulder-line turn so the torso tracks genuine
+// body rotation only subtly — matching kalidoface, whose spine dampener is ~0.45.
+// It is a deliberate tradeoff: the shoulder landmarks shift with head turns and
+// raised hands, and no shoulder-only formula can separate that from a real torso
+// turn, so GAIN scales wanted and unwanted response by the same factor. Measured
+// effect vs the old `(Δz_norm)*3`: head→body coupling 4.06 → 0.58 °/°, resting
+// jitter 12.6° → 1.9° sd, while a genuine turn still registers at half strength.
+export const SPINE_YAW_GAIN = 0.5
+// Safety rail near the atan2 wrap that occurs at ~90° (profile) turns; well
+// outside a seated VTuber's range.
+export const SPINE_YAW_CLAMP = Math.PI / 4
+
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
+
 /**
  * Transform MediaPipe coordinates to VRM bone-local space.
  *
@@ -98,7 +113,12 @@ function solveArm(
   }
 }
 
-export function solvePose(landmarks: PoseLandmarks): PoseResult | null {
+export function solvePose(
+  landmarks: PoseLandmarks,
+  // Metric 3D pose landmarks (MediaPipe poseWorldLandmarks). Used for spine yaw,
+  // whose normalized-z source was unreliable; arms/roll keep using `landmarks`.
+  worldLandmarks?: PoseLandmarks,
+): PoseResult | null {
   if (landmarks.length === 0) {
     return null
   }
@@ -120,9 +140,23 @@ export function solvePose(landmarks: PoseLandmarks): PoseResult | null {
     return null
   }
 
-  // Calculate spine rotation from shoulder positions
-  // Yaw: right shoulder forward = positive yaw (body turned right)
-  const spineYaw = (rightShoulder.z - leftShoulder.z) * 3
+  // Spine yaw (left/right body turn) from the shoulder-line angle.
+  // Right shoulder forward = positive yaw (body turned right).
+  // atan2(Δz, -Δx) measures the shoulder line's rotation away from its rest
+  // direction (world -X), so forward reads ~0 and stays off the atan2 ±180°
+  // branch cut. Scale-invariant in shoulder width, then attenuated + clamped.
+  const lShoulderW = worldLandmarks?.[LEFT_SHOULDER]
+  const rShoulderW = worldLandmarks?.[RIGHT_SHOULDER]
+  let spineYaw: number
+  if (lShoulderW && rShoulderW) {
+    const dz = rShoulderW.z - lShoulderW.z
+    const dx = rShoulderW.x - lShoulderW.x
+    spineYaw = clamp(Math.atan2(dz, -dx) * SPINE_YAW_GAIN, -SPINE_YAW_CLAMP, SPINE_YAW_CLAMP)
+  } else {
+    // No metric landmarks (face-only paths / unit fixtures): fall back to the
+    // legacy normalized-z estimate.
+    spineYaw = (rightShoulder.z - leftShoulder.z) * 3
+  }
 
   // Roll: right shoulder lower = positive roll (leaning right)
   const spineRoll = (rightShoulder.y - leftShoulder.y) * 2
