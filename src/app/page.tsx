@@ -39,9 +39,26 @@ function HomePageContent() {
   // Video element for tracking
   const videoRef = useRef<HTMLVideoElement>(null)
 
-  // Connect camera stream to video element
+  // Connect camera stream to video element.
+  // Perf-debug override: `?footage=<url>` (or `?footage=1` for the default path)
+  // feeds a looping local video file into the same hidden <video> the tracking
+  // loop reads via createImageBitmap, replacing the live camera. This makes
+  // MediaPipe input deterministic so CPU/GPU A/B measurements are reproducible
+  // across runs (a live person moves differently each take). No effect unless
+  // the query param is present, so it is inert in normal use.
   useEffect(() => {
-    if (videoRef.current && stream) {
+    if (!videoRef.current) return
+    const footage = new URLSearchParams(window.location.search).get('footage')
+    if (footage) {
+      const v = videoRef.current
+      v.srcObject = null
+      v.src = footage === '1' ? '/__perf_footage.webm' : footage
+      v.loop = true
+      v.muted = true
+      v.play().catch(() => {})
+      return
+    }
+    if (stream) {
       videoRef.current.srcObject = stream
       videoRef.current.play().catch(() => {
         // Autoplay may be blocked, that's ok

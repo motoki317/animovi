@@ -3,7 +3,10 @@
  * Pinned version and model URLs used by both main-thread tracker and Web Worker.
  */
 
-export const MEDIAPIPE_VERSION = '0.10.32'
+// Must match the installed @mediapipe/tasks-vision package: the JS glue loads a
+// matching WASM runtime from this CDN path, and a version skew between them is
+// unsupported.
+export const MEDIAPIPE_VERSION = '0.10.35'
 
 export const WASM_BASE_PATH =
   `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}/wasm`
