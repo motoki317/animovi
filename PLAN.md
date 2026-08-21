@@ -23,6 +23,25 @@ Internal reference for architecture decisions and implementation history.
 - **FPS throttle**: `lastFrameTime = timestamp - (elapsed % frameInterval)` to prevent drift
 - **Tracking bridge**: Handles null arms/hands (partial visibility) with default pose fallback
 - **Kalman reset**: Filters reset on tracking loss so next detection snaps without lag
+- **Zustand persist hydration**: rehydration is async, so async callbacks can capture stale store values — read latest values through refs
+- **VRM disposal**: must dispose textures in addition to geometries and materials
+
+## Repo Map
+
+| Module | Location |
+|--------|----------|
+| Arm math | `src/lib/math/two-bone-ik.ts` (solveArmDirect, clampArmRotation, directionToEulerZYX) |
+| Pose solver | `src/lib/solver/pose-solver.ts` (solvePose, solveArm, toVRMSpace) |
+| Face solver | `src/lib/solver/face-solver.ts` (solveFace, calculateGaze) |
+| Hand solver | `src/lib/solver/hand-solver.ts` (solveHand, calculateFingerSpreads) |
+| VRM bridge | `src/lib/vrm/tracking-bridge.ts` (TrackingBridge class) |
+| Main page | `src/app/page.tsx` (overlay layout — panel on top of full-window avatar) |
+| PWA | `src/lib/pwa/register-sw.ts`, `public/manifest.json`, `public/sw.js` |
+| Profiler | `src/lib/perf/pipeline-profiler.ts`, `src/lib/perf/profiler-instances.ts` |
+| Perf overlay | `src/components/performance-overlay.tsx` (P key toggle) |
+| Browser compat | `src/lib/compat/browser-support.ts` |
+| Error pages | `src/app/error.tsx`, `src/app/global-error.tsx` |
+| Global errors | `src/lib/error/global-handler.ts`, `src/components/global-error-handler.tsx` |
 
 ## Performance Profile
 
