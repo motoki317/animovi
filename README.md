@@ -1,128 +1,87 @@
 # Animovi
 
-A lightweight, web-based VTubing application that tracks your face, pose, and hands via camera and animates VRM avatars in real time.
+A web-based VTubing app. It tracks your face, upper body, and hands through a camera and animates a VRM avatar in real time.
 
-⚠️ Agentic coding alert: This app was fully coded using Claude Code (Opus 4.6), and I human didn't read
-a single line of code the agent has written. Please feel free to report any inappropriate copyrighted
-code usage or other bugs / issues in general, if you find any.
+> **Warning:** Claude Code wrote all of the code in this app, and the author has not read it. If you find code that uses copyrighted material inappropriately, or any other bug, please [open an issue](https://github.com/motoki317/animovi/issues).
 
 ## Features
 
-- **Face tracking** - Head rotation, eye gaze, and blendshape expressions
-- **Pose tracking** - Upper body and arm movements with 3DOF elbow rotation
-- **Hand tracking** - Individual finger curl and spread
-- **VRM support** - Drag-and-drop any VRM model file
-- **Configurable FPS** - Tracking (10-60) and drawing (15-120) limits
-- **Background options** - Solid color, transparent (for OBS), or custom image
-- **Kalman smoothing** - Adjustable jitter reduction with auto-reset on tracking loss
-- **Performance overlay** - Real-time per-stage profiling (P key)
-- **PWA** - Install to homescreen, offline-capable
-- **Lightweight** - 394KB gzipped bundle, ~0.6ms render time per frame
+- **Face tracking**: head rotation, eye gaze, blinks, and mouth open and smile.
+- **Upper-body tracking** (the Pose Tracking setting): spine lean and turn, a 3-axis shoulder, and a hinged elbow for each arm.
+- **Hand tracking**: wrist rotation, and curl and spread for each finger. It is off by default. Turn it on in the settings panel. Wrist rotation also needs Pose Tracking.
+- **VRM 0.x and 1.x models**: import a `.vrm` or `.glb` file. The app stores up to 10 models in the browser and loads the last-used one on startup. When you import an 11th model, the app deletes the least recently used one.
+- **Smoothing**: an exponential moving average reduces jitter. The setting runs from 0 (off) to 0.9 (strongest). Eyes and mouth use a fixed, faster rate.
+- **Frame-rate limits**: tracking at 10-60 fps and drawing at 15-120 fps.
+- **Backgrounds**: a solid color, transparent (for an OBS browser source), or an image. The app does not keep the image across reloads. After a reload, it shows the solid color until you choose an image again.
+- **Performance overlay**: time per pipeline stage, frame rate, draw calls, triangles, and textures.
+- **PWA**: you can install the app. After one online visit, the page loads offline, but tracking needs a network connection, because the MediaPipe runtime and models load from a CDN. The service worker registers only in a production build (`npm run build`, then `npm start`).
 
-## Getting Started
+## Getting started
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open http://localhost:3000, allow camera access, and optionally drag a `.vrm` file onto the window.
+1. Open http://localhost:3000 and allow camera access.
+2. In the settings panel, click **Import VRM** and select a `.vrm` or `.glb` file. The app has no default avatar.
 
-## Keyboard Shortcuts
+The app needs WebGL2 and camera access (`getUserMedia`). If the browser lacks either one, the app shows "Browser Not Supported".
+
+## Keyboard shortcuts
 
 | Key | Action |
 |-----|--------|
-| H | Toggle settings panel |
-| D | Toggle tracking debug overlay |
-| P | Toggle performance overlay |
+| H | Show or hide the settings panel |
+| D | Show or hide the tracking debug overlay |
+| S | Show or hide the stick-figure overlay (raw tracking next to the applied bone rotations) |
+| P | Show or hide the performance overlay |
 
 ## Development
 
 ```bash
-npm run dev          # Start dev server
-npm test             # Run all tests
-npm run test:watch   # Run tests in watch mode
-npm run test:coverage # Run with coverage
-npm run lint         # Lint source
+npm run dev          # Dev server
+npm test             # Unit tests (Vitest)
+npm run test:watch   # Unit tests in watch mode
+npm run typecheck    # Type-check everything, including tests (next build skips test files)
+npm run test:e2e     # End-to-end tests (Playwright) against a dev server on port 3000
 npm run build        # Production build
+npm start            # Serve the production build
 ```
 
-### TDD Workflow
+Write a failing test before you change behavior. Unit tests sit next to their source (`foo.ts` and `foo.test.ts`). End-to-end tests are in `tests/e2e/`.
 
-This project follows Test-Driven Development (Red-Green-Refactor):
-
-1. **Red** - Write a failing test that defines the expected behavior
-2. **Green** - Write the minimum code to make the test pass
-3. **Refactor** - Clean up while keeping tests green
-
-Tests live next to their source files (`foo.ts` / `foo.test.ts`). Run `npm run test:watch` during development to get instant feedback.
-
-```bash
-# Run a single test file
-npx vitest run src/lib/math/two-bone-ik.test.ts
-
-# Run tests matching a pattern
-npx vitest run -t "solveArmDirect"
-```
-
-### Project Structure
-
-```
-src/
-├── app/                    # Next.js App Router (pages, layouts, error pages)
-├── components/             # React components (AvatarScene, SettingsPanel, ...)
-├── hooks/                  # Custom hooks (useVRMLoader, useVRMTracking, ...)
-├── lib/
-│   ├── compat/             # Browser feature detection
-│   ├── error/              # Global error handler
-│   ├── math/               # Euler utils, Kalman filter, arm solver
-│   ├── mediapipe/          # MediaPipe HolisticLandmarker wrapper
-│   ├── perf/               # PipelineProfiler, PerformanceMonitor
-│   ├── pwa/                # Service worker registration
-│   ├── solver/             # Face, pose, hand solvers
-│   ├── vrm/                # TrackingBridge, VRM animator
-│   └── worker/             # Web Worker protocol
-├── stores/                 # Zustand stores (settings, tracking)
-└── types/                  # Shared TypeScript types
-```
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|------------|
-| Framework | Next.js (App Router) + TypeScript |
-| 3D | Three.js + @pixiv/three-vrm |
-| Tracking | MediaPipe Tasks Vision (HolisticLandmarker) |
-| State | Zustand |
-| Testing | Vitest + React Testing Library |
+To check the app in a browser without a camera, see [docs/browser-testing.md](docs/browser-testing.md). For the library choices, the left-right convention, and performance measurements, see [docs/architecture.md](docs/architecture.md).
 
 ## Architecture
 
 ```
-┌─────────────────── Main Thread ───────────────────┐
-│  React UI  <-->  Zustand  <-->  Three.js Scene    │
-│  (Settings)      (State)       (VRM Render)       │
-│                     ^                             │
-│               Kalman Filter                       │
-│                     | smoothed landmarks          │
-└─────────────────────┼─────────────────────────────┘
-                      | postMessage
-┌─────────────────────┼─────────────────────────────┐
-│               Web Worker                          │
-│  MediaPipe Holistic -> Custom Solver -> rotations │
-└───────────────────────────────────────────────────┘
+Main thread                                    Web Worker
+───────────                                    ──────────
+<video> (camera)
+   │ createImageBitmap()
+   └──────────── postMessage ─────────────────► MediaPipe Holistic Landmarker
+                                                (Face Landmarker if Pose and Hand Tracking are off)
+                                                   │ landmarks
+                                                   ▼
+                                                solveHolistic(): bone rotations
+                                                and expression weights
+TrackingBridge ◄──────── postMessage ─────────────┘
+   │ smoothing, then writes VRM bones and expressions
+   ▼
+AvatarScene render loop (Three.js + three-vrm)
 ```
+
+If the worker does not start within 15 seconds, or fails later, the same pipeline runs on the main thread. Settings persist in `localStorage`, and imported VRMs persist in IndexedDB.
 
 ## Acknowledgments
 
-This project was inspired by and references the following:
-
-- [VRM Studio](https://github.com/vucinatim/vrm-studio) - Architectural reference for VRM + MediaPipe integration
-- [KalidoKit](https://github.com/yeemachine/kalidokit) (MIT) - Inspired the direct vector-to-euler solver approach
-- [Wawa Sensei Tutorial](https://wawasensei.dev/tuto/vrm-avatar-with-threejs-react-three-fiber-and-mediapipe) - Learning resource
-- [Three.js](https://github.com/mrdoob/three.js) (MIT) - Quaternion-to-Euler math reference
-- [MediaPipe](https://github.com/google-ai-edge/mediapipe) (Apache-2.0) - Face, pose, and hand landmark detection
-- [@pixiv/three-vrm](https://github.com/pixiv/three-vrm) (MIT) - VRM model loading and rendering
+- [VRM Studio](https://github.com/vucinatim/vrm-studio): architecture reference for VRM and MediaPipe integration
+- [KalidoKit](https://github.com/yeemachine/kalidokit) (MIT): the idea of computing bone rotations directly from landmark directions instead of inverse kinematics
+- [Wawa Sensei tutorial](https://wawasensei.dev/tuto/vrm-avatar-with-threejs-react-three-fiber-and-mediapipe): learning resource
+- [Three.js](https://github.com/mrdoob/three.js) (MIT): quaternion-to-Euler math reference
+- [MediaPipe](https://github.com/google-ai-edge/mediapipe) (Apache-2.0): face, pose, and hand landmark detection
+- [@pixiv/three-vrm](https://github.com/pixiv/three-vrm) (MIT): VRM loading and rendering
 
 ## License
 

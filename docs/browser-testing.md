@@ -1,35 +1,23 @@
-# Browser testing (agent-browser)
+# Browser testing
 
-Gotchas when driving animovi with the agent-browser CLI. Each one has cost a real debugging
-session.
+How to check animovi in a real browser with the [agent-browser](https://github.com/vercel-labs/agent-browser) CLI.
 
-## Clear the service worker before trusting anything
+## Feed a video instead of the camera
 
-Animovi is a PWA: after editing source, the service worker keeps serving cached old JS chunks, so
-a screenshot or console check can show stale behavior — including phantom errors that reference
-identifiers no longer present in the source. Restarting the dev server does NOT fix it; the stale
-chunks come from the browser's SW cache. Before trusting any agent-browser check:
+A headless browser has no camera. The `?footage=` query parameter plays a looping video in place of the camera, and the tracking pipeline reads it like camera input. The repository contains no video and no VRM, so bring your own.
 
-```sh
-agent-browser eval "(async()=>{const rs=await navigator.serviceWorker.getRegistrations();for(const r of rs)await r.unregister();const ks=await caches.keys();for(const k of ks)await caches.delete(k)})()"
-```
+1. Copy a video of a person to `public/`, with a name that matches `public/__perf_footage.*`. Git and Docker ignore that pattern.
+2. Run `npm run dev`, open http://localhost:3000, and import a VRM with the Import VRM button. In agent-browser, run `agent-browser upload '[data-testid="vrm-file-input"]' <path to the .vrm file>`.
+3. Open `/?footage=/<file name>`, for example `/?footage=/__perf_footage.mp4`. The app loads the last-used VRM on startup, so the avatar from step 2 is still there. `/?footage=1` is short for `/?footage=/__perf_footage.webm`.
 
-then re-open the URL. This does not clear localStorage/IndexedDB (settings and the stored VRM
-persist), but a heavy clear plus navigation churn can still reset persisted state — re-import the
-VRM if the avatar canvas is empty. Give a human the same clear step when handing off a visual
-check.
+The same video gives the same input on every run, so the stage timings in the performance overlay (P key) are comparable between runs.
 
-## The WebGL canvas cannot be screenshotted
+## Read rotations, not pixels
 
-agent-browser cannot capture the WebGL avatar canvas: screenshots show only the page's CSS
-background, headless and `--headed` alike (a vivid scene background never appears either), and a
-2D `drawImage` readback of the canvas returns transparent pixels. Never judge avatar pose from
-pixels. Read the applied bone rotations from the live scene instead: temporarily expose e.g.
-`vrm.humanoid.getNormalizedBoneNode('spine').rotation` (and `'head'`) on `window` in the
-avatar-scene render loop, sample over the motion, then revert — the bone rotation IS the rendered
-transform, and more precise than eyeballing pixels.
+To check the avatar's pose, press S to open the stick-figure overlay. Its table lists the shoulder, elbow, spine, and head bones, in degrees. For each axis, the `raw` column shows the solver output, and the `app` column shows the rotation written to the bone after smoothing and the VRM-version sign correction. agent-browser can read the table as page text.
+
+The D key shows the tracking debug overlay: which landmark sets MediaPipe detected, and the solver output. It shows the raw wrist landmarks only when tracking runs on the main thread.
 
 ## Tabs stuck at about:blank
 
-A version-mismatched agent-browser daemon resets every tab to `about:blank`;
-`agent-browser doctor --fix` clears it.
+If every agent-browser tab resets to `about:blank`, the daemon version does not match the CLI. Run `agent-browser doctor`, which removes stale daemon files. If the tabs still reset, run `agent-browser doctor --fix`. It also runs destructive repairs, such as a Chrome reinstall.
