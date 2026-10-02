@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { SettingsPanel, type SettingsPanelProps } from './settings-panel'
 import type { VRMMeta } from '../lib/vrm/vrm-storage'
@@ -41,6 +41,12 @@ describe('SettingsPanel', () => {
     fireEvent.change(slider, { target: { value: '0.8' } })
 
     expect(onSmoothingChange).toHaveBeenCalledWith(0.8)
+  })
+
+  it('caps the smoothing slider at 0.9', () => {
+    render(<SettingsPanel {...defaultProps} />)
+
+    expect(screen.getByLabelText(/smoothing/i)).toHaveAttribute('max', '0.9')
   })
 
   it('should show import VRM button when onVRMImport provided', () => {
@@ -191,6 +197,30 @@ describe('SettingsPanel', () => {
       const item2 = screen.getByTestId('vrm-gallery-item-2')
       // jsdom normalizes hex to rgb
       expect(item2.style.borderColor).toBe('rgb(79, 195, 247)')
+    })
+
+    describe('thumbnails', () => {
+      afterEach(() => {
+        vi.unstubAllGlobals()
+      })
+
+      it('creates one object URL per thumbnail and revokes it on unmount', () => {
+        const createObjectURL = vi.fn((blob: Blob) => `blob:${blob.size}`)
+        const revokeObjectURL = vi.fn()
+        vi.stubGlobal('URL', Object.assign(class extends URL {}, { createObjectURL, revokeObjectURL }))
+        const vrms: VRMMeta[] = [
+          { ...mockVRMs[0], thumbnail: new Blob(['a'], { type: 'image/jpeg' }) },
+          { ...mockVRMs[1], thumbnail: new Blob(['bb'], { type: 'image/jpeg' }) },
+        ]
+        const props = { ...defaultProps, onVRMImport: vi.fn(), storedVRMs: vrms }
+
+        const { rerender, unmount } = render(<SettingsPanel {...props} />)
+        rerender(<SettingsPanel {...props} smoothing={0.6} />)
+        expect(createObjectURL).toHaveBeenCalledTimes(2)
+
+        unmount()
+        expect(revokeObjectURL.mock.calls.map(([url]) => url).sort()).toEqual(['blob:1', 'blob:2'])
+      })
     })
 
     it('should keep import button alongside gallery', () => {

@@ -1,10 +1,6 @@
 'use client'
 
-/**
- * AvatarScene - Three.js canvas for VRM avatar rendering.
- */
-
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { VRMUtils } from '@pixiv/three-vrm'
@@ -12,31 +8,49 @@ import type { VRM } from '@pixiv/three-vrm'
 import type { BackgroundType } from './background-settings'
 import { renderProfiler } from '../lib/perf/profiler-instances'
 import type { RendererInfo } from './performance-overlay'
+import { captureThumbnail } from '../lib/vrm/vrm-thumbnail'
+
+export interface AvatarSceneHandle {
+  /** Draws a frame and encodes it as a JPEG thumbnail. */
+  captureThumbnail: () => Promise<Blob>
+}
 
 interface AvatarSceneProps {
   vrm?: VRM | null
   backgroundType?: BackgroundType
   backgroundColor?: string
+  /** Shown behind the canvas when backgroundType is 'image'. Without it, the solid color shows. */
+  backgroundImageUrl?: string
   cameraY?: number
   cameraZ?: number
   autoFrameOnLoad?: boolean
   onAutoFrame?: (y: number, z: number) => void
-  enableOrbitControls?: boolean
   drawingFps?: number
   onRendererInfo?: (info: RendererInfo) => void
+  ref?: Ref<AvatarSceneHandle>
+}
+
+/** Puts the camera at height `y` and distance `z`, looking level at the avatar's axis. */
+function aimCamera(camera: THREE.PerspectiveCamera, controls: OrbitControls | null, y: number, z: number) {
+  camera.position.y = y
+  camera.position.z = z
+  camera.lookAt(0, y, 0)
+  // OrbitControls.update() turns the camera toward the target on every frame.
+  controls?.target.set(0, y, 0)
 }
 
 export function AvatarScene({
   vrm,
   backgroundType = 'solid',
   backgroundColor = '#1a1a2e',
+  backgroundImageUrl,
   cameraY = 1.3,
   cameraZ = 1.5,
   autoFrameOnLoad = true,
   onAutoFrame,
-  enableOrbitControls = true,
   drawingFps = 60,
   onRendererInfo,
+  ref,
 }: AvatarSceneProps) {
   const [contextLost, setContextLost] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -44,47 +58,31 @@ export function AvatarScene({
   const sceneRef = useRef<THREE.Scene | null>(null)
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null)
   const controlsRef = useRef<OrbitControls | null>(null)
-  const clockRef = useRef<THREE.Clock | null>(null)
 
-  // Store VRM in ref so animation loop can access it
+  // The render loop starts once on mount, so it reads changing props through refs.
   const vrmRef = useRef<VRM | null>(null)
   vrmRef.current = vrm ?? null
-
-  // Store callback in ref to avoid dependency issues
   const onAutoFrameRef = useRef(onAutoFrame)
   onAutoFrameRef.current = onAutoFrame
-
-  // Track which VRM we've already auto-framed to prevent loops
-  const autoFramedVrmRef = useRef<VRM | null>(null)
-
-  // Store drawing FPS in ref so render loop can access latest value
   const drawingFpsRef = useRef(drawingFps)
   drawingFpsRef.current = drawingFps
-
-  // Store renderer info callback in ref
   const onRendererInfoRef = useRef(onRendererInfo)
   onRendererInfoRef.current = onRendererInfo
 
-  // Store initial values in refs for initialization
-  const initialBackgroundTypeRef = useRef(backgroundType)
-  const initialBackgroundColorRef = useRef(backgroundColor)
+  // Frame each VRM once, even when the VRM effect runs again for the same VRM.
+  const autoFramedVrmRef = useRef<VRM | null>(null)
+
+  // Mount-time values. The effects below apply later changes.
   const initialCameraYRef = useRef(cameraY)
   const initialCameraZRef = useRef(cameraZ)
-  const enableOrbitControlsRef = useRef(enableOrbitControls)
 
   useEffect(() => {
     if (!containerRef.current) return
 
-    // Initialize scene
+    // The background effect below sets the initial background.
     const scene = new THREE.Scene()
-    if (initialBackgroundTypeRef.current === 'transparent') {
-      scene.background = null
-    } else {
-      scene.background = new THREE.Color(initialBackgroundColorRef.current)
-    }
     sceneRef.current = scene
 
-    // Initialize camera
     const camera = new THREE.PerspectiveCamera(
       30,
       containerRef.current.clientWidth / containerRef.current.clientHeight,
@@ -95,24 +93,22 @@ export function AvatarScene({
     camera.lookAt(0, initialCameraYRef.current, 0)
     cameraRef.current = camera
 
-    // Initialize renderer with alpha support for potential transparent backgrounds
     const renderer = new THREE.WebGLRenderer({
       antialias: true,
-      alpha: true, // Always enable alpha for flexibility
+      // Alpha is fixed when the context is created. Enable it now so that the
+      // background can switch to transparent or to an image later.
+      alpha: true,
       powerPreference: 'high-performance',
     })
     renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight)
-    // Cap pixel ratio at 2 to avoid excessive fill rate on high-DPI displays
+    // Cap at 2x to limit the fill rate on high-DPI displays.
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-    if (initialBackgroundTypeRef.current === 'transparent') {
-      renderer.setClearColor(0x000000, 0)
-    }
     containerRef.current.appendChild(renderer.domElement)
     rendererRef.current = renderer
 
-    // Handle WebGL context loss/restore
     const canvas = renderer.domElement
     const handleContextLost = (event: Event) => {
+      // Without preventDefault(), the browser never restores the context.
       event.preventDefault()
       setContextLost(true)
       console.warn('[AvatarScene] WebGL context lost')
@@ -124,7 +120,6 @@ export function AvatarScene({
     canvas.addEventListener('webglcontextlost', handleContextLost)
     canvas.addEventListener('webglcontextrestored', handleContextRestored)
 
-    // Add lights
     const directionalLight = new THREE.DirectionalLight(0xffffff, 1)
     directionalLight.position.set(1, 1, 1)
     scene.add(directionalLight)
@@ -132,47 +127,42 @@ export function AvatarScene({
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.5)
     scene.add(ambientLight)
 
-    // Initialize orbit controls for camera manipulation
-    let controls: OrbitControls | null = null
-    if (enableOrbitControlsRef.current) {
-      controls = new OrbitControls(camera, renderer.domElement)
-      controls.target.set(0, initialCameraYRef.current, 0)
-      controls.enableDamping = true
-      controls.dampingFactor = 0.05
-      controls.minDistance = 0.5
-      controls.maxDistance = 5
-      controls.maxPolarAngle = Math.PI * 0.9 // Prevent flipping
-      controls.minPolarAngle = Math.PI * 0.1
-      controlsRef.current = controls
-    }
+    const controls = new OrbitControls(camera, renderer.domElement)
+    controls.target.set(0, initialCameraYRef.current, 0)
+    controls.enableDamping = true
+    controls.dampingFactor = 0.05
+    controls.minDistance = 0.5
+    controls.maxDistance = 5
+    controls.maxPolarAngle = Math.PI * 0.9
+    controls.minPolarAngle = Math.PI * 0.1
+    controlsRef.current = controls
 
-    // Animation loop with VRM update and FPS limiting
-    const clock = new THREE.Clock()
-    clockRef.current = clock
+    const timer = new THREE.Timer()
     let animationId: number
     let lastFrameTime = 0
     let rendererInfoCounter = 0
     function animate(timestamp = 0) {
       animationId = requestAnimationFrame(animate)
 
-      // Throttle to target drawing FPS
       const frameInterval = 1000 / drawingFpsRef.current
       const elapsed = timestamp - lastFrameTime
       if (elapsed < frameInterval) {
         return
       }
-      // Carry forward remainder to prevent drift and frame skipping
+      // Carry the remainder forward. Setting lastFrameTime = timestamp drops the
+      // average rate below the target.
       lastFrameTime = timestamp - (elapsed % frameInterval)
 
       renderProfiler.markFrame()
 
-      const deltaTime = clock.getDelta()
+      timer.update(timestamp)
+      const deltaTime = timer.getDelta()
 
       renderProfiler.begin('controls')
-      controls?.update() // Required for damping
+      // Damping needs an update on every frame.
+      controls.update()
       renderProfiler.end('controls')
 
-      // Update VRM (required for expressions, spring bones, and constraints)
       renderProfiler.begin('vrm_update')
       if (vrmRef.current) {
         vrmRef.current.update(deltaTime)
@@ -183,7 +173,6 @@ export function AvatarScene({
       renderer.render(scene, camera)
       renderProfiler.end('render')
 
-      // Emit renderer info periodically (every ~60 frames)
       if (++rendererInfoCounter >= 60) {
         rendererInfoCounter = 0
         onRendererInfoRef.current?.({
@@ -195,7 +184,6 @@ export function AvatarScene({
     }
     animate()
 
-    // Handle resize
     function handleResize() {
       if (!containerRef.current) return
       const width = containerRef.current.clientWidth
@@ -211,92 +199,81 @@ export function AvatarScene({
       window.removeEventListener('resize', handleResize)
       canvas.removeEventListener('webglcontextlost', handleContextLost)
       canvas.removeEventListener('webglcontextrestored', handleContextRestored)
-      controls?.dispose()
+      controls.dispose()
       renderer.dispose()
-      containerRef.current?.removeChild(renderer.domElement)
+      // dispose() keeps the WebGL context until garbage collection, and Chrome
+      // drops the oldest context when too many are alive.
+      renderer.forceContextLoss()
+      // React clears containerRef before this cleanup runs, so remove the canvas
+      // through its own reference.
+      canvas.remove()
     }
-  }, []) // Empty deps - only initialize once
+  }, [])
 
-  // Update camera position when props change
   useEffect(() => {
     if (cameraRef.current) {
-      cameraRef.current.position.y = cameraY
-      cameraRef.current.position.z = cameraZ
-      cameraRef.current.lookAt(0, cameraY, 0)
+      aimCamera(cameraRef.current, controlsRef.current, cameraY, cameraZ)
     }
   }, [cameraY, cameraZ])
 
-  // Update background when props change
+  // An image background is CSS on the container, so the canvas must stay transparent.
+  const backgroundImage = backgroundType === 'image' && backgroundImageUrl ? backgroundImageUrl : undefined
+  const canvasTransparent = backgroundType === 'transparent' || backgroundImage !== undefined
+
   useEffect(() => {
     if (sceneRef.current) {
-      if (backgroundType === 'transparent') {
-        sceneRef.current.background = null
-      } else {
-        sceneRef.current.background = new THREE.Color(backgroundColor)
-      }
+      sceneRef.current.background = canvasTransparent ? null : new THREE.Color(backgroundColor)
     }
-    if (rendererRef.current) {
-      if (backgroundType === 'transparent') {
-        rendererRef.current.setClearColor(0x000000, 0)
-      } else {
-        rendererRef.current.setClearColor(0x000000, 1)
-      }
-    }
-  }, [backgroundType, backgroundColor])
+    rendererRef.current?.setClearColor(0x000000, canvasTransparent ? 0 : 1)
+  }, [canvasTransparent, backgroundColor])
 
-  // Add/remove VRM from scene and handle auto-framing
+  useImperativeHandle(ref, () => ({
+    captureThumbnail: () => {
+      const renderer = rendererRef.current
+      const scene = sceneRef.current
+      const camera = cameraRef.current
+      if (!renderer || !scene || !camera) {
+        return Promise.reject(new Error('The avatar scene is not mounted'))
+      }
+      // The drawing buffer is not preserved, so it is black once the browser composites
+      // the frame. Draw and read it in the same task.
+      renderer.render(scene, camera)
+      return captureThumbnail(renderer.domElement)
+    },
+  }), [])
+
   useEffect(() => {
     if (!sceneRef.current) return
 
     if (vrm?.scene) {
-      // VRM 0.x models face +Z natively; VRM 1.x face -Z. The default Three.js camera
-      // sits at +Z looking toward origin, so VRM 0.x must be flipped to match VRM 1.x.
-      // rotateVRM0 is a no-op for VRM 1.x.
+      // VRM 0.x models face -Z and VRM 1.x models face +Z. The camera is on +Z, so
+      // rotateVRM0 turns VRM 0.x models 180° to face it.
       VRMUtils.rotateVRM0(vrm)
       sceneRef.current.add(vrm.scene)
 
-      // Auto-frame to head position when VRM loads (only once per VRM)
       if (autoFrameOnLoad && vrm !== autoFramedVrmRef.current) {
         autoFramedVrmRef.current = vrm
-
-        // Run auto-frame logic
-        if (cameraRef.current) {
+        const camera = cameraRef.current
+        if (camera) {
           try {
-            // Try to get head bone position
+            let newY: number
+            let newZ: number
             const headBone = vrm.humanoid?.getNormalizedBoneNode('head')
             if (headBone) {
-              const headPos = new THREE.Vector3()
-              headBone.getWorldPosition(headPos)
-
-              // Position camera to look at head with some offset
-              const newY = headPos.y
-              const newZ = 1.5 // Keep default distance
-
-              cameraRef.current.position.y = newY
-              cameraRef.current.position.z = newZ
-              cameraRef.current.lookAt(0, newY, 0)
-
-              // Notify parent via ref (avoids dependency loop)
-              onAutoFrameRef.current?.(newY, newZ)
+              newY = headBone.getWorldPosition(new THREE.Vector3()).y
+              newZ = 1.5
             } else {
-              // Fallback: use bounding box center
+              // Without a head bone, aim at the upper body of the bounding box.
               const box = new THREE.Box3().setFromObject(vrm.scene)
               const center = box.getCenter(new THREE.Vector3())
               const size = box.getSize(new THREE.Vector3())
-
-              // Position camera to see the upper body/head
-              const newY = center.y + size.y * 0.2
-              const newZ = Math.max(1.5, size.y * 0.8)
-
-              cameraRef.current.position.y = newY
-              cameraRef.current.position.z = newZ
-              cameraRef.current.lookAt(0, newY, 0)
-
-              // Notify parent via ref (avoids dependency loop)
-              onAutoFrameRef.current?.(newY, newZ)
+              newY = center.y + size.y * 0.2
+              newZ = Math.max(1.5, size.y * 0.8)
             }
+            aimCamera(camera, controlsRef.current, newY, newZ)
+            onAutoFrameRef.current?.(newY, newZ)
           } catch {
-            // Silently fail - keep current camera position
+            // Keep the current camera position if the model cannot be measured.
           }
         }
       }
@@ -307,14 +284,20 @@ export function AvatarScene({
         sceneRef.current.remove(vrm.scene)
       }
     }
-  }, [vrm, autoFrameOnLoad]) // Removed autoFrameToHead dependency - using refs instead
+  }, [vrm, autoFrameOnLoad])
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%', minHeight: '400px' }}>
       <div
         ref={containerRef}
         data-testid="avatar-scene"
-        style={{ width: '100%', height: '100%' }}
+        style={{
+          width: '100%',
+          height: '100%',
+          backgroundImage: backgroundImage ? `url("${backgroundImage}")` : undefined,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+        }}
       />
       {contextLost && (
         <div

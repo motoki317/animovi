@@ -1,41 +1,9 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { useSettingsStore } from './settings-store'
-
-// Mock localStorage
-const localStorageMock = {
-  store: {} as Record<string, string>,
-  getItem: vi.fn((key: string) => localStorageMock.store[key] ?? null),
-  setItem: vi.fn((key: string, value: string) => {
-    localStorageMock.store[key] = value
-  }),
-  clear: vi.fn(() => {
-    localStorageMock.store = {}
-  }),
-}
-
-Object.defineProperty(global, 'localStorage', {
-  value: localStorageMock,
-})
 
 describe('useSettingsStore', () => {
   beforeEach(() => {
-    localStorageMock.clear()
-    useSettingsStore.setState({
-      smoothing: 0.5,
-      faceTrackingEnabled: true,
-      poseTrackingEnabled: true,
-      handTrackingEnabled: false,
-      backgroundType: 'solid',
-      backgroundColor: '#1a1a2e',
-      backgroundImageUrl: undefined,
-      cameraY: 1.3,
-      cameraZ: 1.5,
-      cameraAutoFrame: true,
-      panelVisible: true,
-      trackingFps: 30,
-      drawingFps: 60,
-      lastVrmId: null,
-    })
+    useSettingsStore.setState(useSettingsStore.getInitialState(), true)
   })
 
   it('should initialize with default values', () => {
@@ -120,5 +88,26 @@ describe('useSettingsStore', () => {
     useSettingsStore.getState().setLastVrmId(42)
     useSettingsStore.getState().setLastVrmId(null)
     expect(useSettingsStore.getState().lastVrmId).toBeNull()
+  })
+
+  it('does not persist the background image URL', () => {
+    useSettingsStore.getState().setBackgroundType('image')
+    useSettingsStore.getState().setBackgroundImageUrl('blob:http://localhost/bg')
+
+    const stored = JSON.parse(localStorage.getItem('animovi-settings')!)
+    expect(stored.state.backgroundType).toBe('image')
+    expect(stored.state).not.toHaveProperty('backgroundImageUrl')
+  })
+
+  it('ignores a background image URL stored by an earlier version', async () => {
+    localStorage.setItem('animovi-settings', JSON.stringify({
+      state: { backgroundType: 'image', backgroundImageUrl: 'blob:http://localhost/dead' },
+      version: 0,
+    }))
+
+    await useSettingsStore.persist.rehydrate()
+
+    expect(useSettingsStore.getState().backgroundType).toBe('image')
+    expect(useSettingsStore.getState().backgroundImageUrl).toBeUndefined()
   })
 })

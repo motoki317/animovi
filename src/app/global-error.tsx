@@ -1,9 +1,7 @@
 'use client'
 
-/**
- * Next.js global error page.
- * Catches errors in the root layout itself. Must include its own <html> and <body>.
- */
+// Next.js renders this in place of the root layout when the layout throws, so it
+// must render its own <html> and <body>.
 
 export default function GlobalError({
   error,

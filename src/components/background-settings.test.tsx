@@ -18,7 +18,6 @@ describe('BackgroundSettings', () => {
       />
     )
 
-    // Use getByRole with type='color' to find the color input specifically
     const colorInput = screen.getByTestId('color-input')
     expect(colorInput).toHaveValue('#4a90d9')
 
@@ -76,7 +75,7 @@ describe('BackgroundSettings', () => {
     expect(imageOption).toBeChecked()
   })
 
-  it('should persist background preference', () => {
+  it('should show the color from props in the color input', () => {
     const storedSettings = {
       type: 'solid' as const,
       color: '#3498db',

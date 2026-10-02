@@ -1,10 +1,5 @@
 'use client'
 
-/**
- * PerformanceOverlay - Real-time performance profiling display.
- * Toggle with P key. Shows per-stage timing breakdown for tracking and rendering.
- */
-
 import { useState, useEffect, memo } from 'react'
 import { trackingProfiler, renderProfiler } from '../lib/perf/profiler-instances'
 import type { StageTimings } from '../lib/perf/pipeline-profiler'
@@ -51,7 +46,7 @@ export const PerformanceOverlay = memo(function PerformanceOverlay({
       })
     }, POLL_INTERVAL)
 
-    // Immediate first read
+    // Fill the overlay now, not after the first interval.
     setData({
       trackingTimings: trackingProfiler.getTimings(),
       renderTimings: renderProfiler.getTimings(),
@@ -103,7 +98,6 @@ export const PerformanceOverlay = memo(function PerformanceOverlay({
         Performance
       </div>
 
-      {/* Tracking section */}
       <div style={sectionStyle}>
         <div style={labelStyle}>
           Tracking{' '}
@@ -119,7 +113,6 @@ export const PerformanceOverlay = memo(function PerformanceOverlay({
         {data && <StageList timings={data.trackingTimings} />}
       </div>
 
-      {/* Rendering section */}
       <div style={sectionStyle}>
         <div style={labelStyle}>
           Rendering{' '}
@@ -135,7 +128,6 @@ export const PerformanceOverlay = memo(function PerformanceOverlay({
         {data && <StageList timings={data.renderTimings} />}
       </div>
 
-      {/* GPU info */}
       {rendererInfo && (
         <div>
           <div style={labelStyle}>GPU</div>

@@ -1,11 +1,6 @@
 'use client'
 
-/**
- * Next.js App Router error page.
- * Catches errors in route segments and displays a recovery UI.
- */
-
-export default function Error({
+export default function ErrorPage({
   error,
   reset,
 }: {

@@ -1,9 +1,5 @@
 'use client'
 
-/**
- * CameraProvider - Provides camera stream access to child components.
- */
-
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 
 interface CameraContextValue {
@@ -33,6 +29,8 @@ export function CameraProvider({ children }: CameraProviderProps) {
 
   useEffect(() => {
     let mounted = true
+    let acquired: MediaStream | null = null
+    const stopTracks = (s: MediaStream) => s.getTracks().forEach((track) => track.stop())
 
     async function initCamera() {
       try {
@@ -40,10 +38,13 @@ export function CameraProvider({ children }: CameraProviderProps) {
           video: { facingMode: 'user' },
           audio: false,
         })
-        if (mounted) {
-          setStream(mediaStream)
-          setIsLoading(false)
+        if (!mounted) {
+          stopTracks(mediaStream)
+          return
         }
+        acquired = mediaStream
+        setStream(mediaStream)
+        setIsLoading(false)
       } catch (e) {
         if (mounted) {
           setError(e instanceof Error ? e : new Error('Camera access denied'))
@@ -56,9 +57,7 @@ export function CameraProvider({ children }: CameraProviderProps) {
 
     return () => {
       mounted = false
-      if (stream) {
-        stream.getTracks().forEach((track) => track.stop())
-      }
+      if (acquired) stopTracks(acquired)
     }
   }, [])
 

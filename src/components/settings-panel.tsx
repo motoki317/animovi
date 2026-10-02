@@ -1,10 +1,6 @@
 'use client'
 
-/**
- * SettingsPanel - Controls for tracking and display settings.
- */
-
-import { useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { VRMMeta } from '../lib/vrm/vrm-storage'
 
 export interface SettingsPanelProps {
@@ -20,17 +16,13 @@ export interface SettingsPanelProps {
   onTrackingFpsChange: (fps: number) => void
   drawingFps: number
   onDrawingFpsChange: (fps: number) => void
-  /** Optional: callback when a VRM file is selected for import */
+  /** The Avatar section (import button and gallery) renders only when this is set. */
   onVRMImport?: (file: File) => void
-  /** Optional: whether VRM is currently loading */
+  /** Disables the import button and gallery selection. */
   vrmLoading?: boolean
-  /** Stored VRM metadata list for the gallery */
   storedVRMs?: VRMMeta[]
-  /** Currently active VRM ID */
   activeVrmId?: number | null
-  /** Callback to load a stored VRM */
   onVRMSelect?: (id: number) => void
-  /** Callback to delete a stored VRM */
   onVRMDelete?: (id: number) => void
 }
 
@@ -61,7 +53,7 @@ export function SettingsPanel({
     if (file && onVRMImport) {
       onVRMImport(file)
     }
-    // Reset input so the same file can be selected again
+    // Clear the input so that choosing the same file again fires a change event.
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
@@ -75,7 +67,6 @@ export function SettingsPanel({
     <div className="settings-panel" style={{ padding: '1rem' }}>
       <h3>Settings</h3>
 
-      {/* VRM Import + Gallery Section */}
       {onVRMImport && (
         <div style={{ marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '1px solid #444' }}>
           <h4 style={{ marginTop: 0, marginBottom: '0.5rem' }}>Avatar</h4>
@@ -104,7 +95,6 @@ export function SettingsPanel({
             Supports .vrm and .glb files
           </p>
 
-          {/* VRM Gallery */}
           {storedVRMs.length > 0 && (
             <div
               data-testid="vrm-gallery"
@@ -130,11 +120,7 @@ export function SettingsPanel({
                   onClick={() => !vrmLoading && onVRMSelect?.(vrm.id)}
                 >
                   {vrm.thumbnail instanceof Blob && vrm.thumbnail.size > 0 ? (
-                    <img
-                      src={URL.createObjectURL(vrm.thumbnail)}
-                      alt={vrm.name}
-                      style={{ width: '100%', aspectRatio: '1', objectFit: 'cover', display: 'block' }}
-                    />
+                    <Thumbnail blob={vrm.thumbnail} alt={vrm.name} />
                   ) : (
                     <div
                       style={{
@@ -201,11 +187,12 @@ export function SettingsPanel({
       <div style={{ marginBottom: '1rem' }}>
         <label htmlFor="smoothing">
           Smoothing: {smoothing.toFixed(2)}
+          {/* TrackingBridge floors responsiveness (1 - smoothing) at 0.1, so values above 0.9 act like 0.9. */}
           <input
             id="smoothing"
             type="range"
             min="0"
-            max="1"
+            max="0.9"
             step="0.1"
             value={smoothing}
             onChange={(e) => onSmoothingChange(parseFloat(e.target.value))}
@@ -279,5 +266,23 @@ export function SettingsPanel({
         </label>
       </div>
     </div>
+  )
+}
+
+function Thumbnail({ blob, alt }: { blob: Blob; alt: string }) {
+  // An object URL created during render leaks once per render. The effect revokes each URL.
+  const [src, setSrc] = useState<string>()
+  useEffect(() => {
+    const url = URL.createObjectURL(blob)
+    setSrc(url)
+    return () => URL.revokeObjectURL(url)
+  }, [blob])
+
+  return (
+    <img
+      src={src}
+      alt={alt}
+      style={{ width: '100%', aspectRatio: '1', objectFit: 'cover', display: 'block' }}
+    />
   )
 }

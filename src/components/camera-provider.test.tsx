@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import { CameraProvider, useCamera } from './camera-provider'
 
-// Mock getUserMedia
 const mockGetUserMedia = vi.fn()
 const mockEnumerateDevices = vi.fn()
 
@@ -74,5 +73,46 @@ describe('CameraProvider', () => {
       expect(screen.getByTestId('error').textContent).toBe('Permission denied')
       expect(screen.getByTestId('loading').textContent).toBe('not-loading')
     })
+  })
+})
+
+describe('CameraProvider cleanup', () => {
+  function makeStream() {
+    const track = { stop: vi.fn() }
+    const stream = { getTracks: () => [track] } as unknown as MediaStream
+    return { stream, track }
+  }
+
+  it('stops the camera tracks on unmount', async () => {
+    const { stream, track } = makeStream()
+    mockGetUserMedia.mockResolvedValue(stream)
+
+    const { unmount } = render(
+      <CameraProvider>
+        <TestComponent />
+      </CameraProvider>
+    )
+    await waitFor(() => {
+      expect(screen.getByTestId('stream').textContent).toBe('has-stream')
+    })
+    unmount()
+
+    expect(track.stop).toHaveBeenCalled()
+  })
+
+  it('stops a stream that arrives after unmount', async () => {
+    const { stream, track } = makeStream()
+    let resolveStream!: (s: MediaStream) => void
+    mockGetUserMedia.mockReturnValue(new Promise((resolve) => { resolveStream = resolve }))
+
+    const { unmount } = render(
+      <CameraProvider>
+        <TestComponent />
+      </CameraProvider>
+    )
+    unmount()
+    resolveStream(stream)
+
+    await waitFor(() => expect(track.stop).toHaveBeenCalled())
   })
 })

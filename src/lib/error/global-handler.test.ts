@@ -97,10 +97,9 @@ describe('installGlobalErrorHandler', () => {
     window.dispatchEvent(event)
 
     expect(handler1).toHaveBeenCalledOnce()
-    // cleanup2 should be a no-op
     expect(cleanup2).toBeTypeOf('function')
+    // cleanup2 is a no-op, so handler1 still fires.
     cleanup2()
-    // Original handler should still work
     window.dispatchEvent(event)
     expect(handler1).toHaveBeenCalledTimes(2)
   })

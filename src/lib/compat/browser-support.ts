@@ -1,18 +1,14 @@
-/**
- * Browser feature detection for required APIs.
- * WebGL2 and Camera API are required; Service Worker is optional (PWA only).
- */
-
 export interface BrowserSupport {
   webgl2: boolean
   mediaDevices: boolean
   serviceWorker: boolean
-  /** True if all required features are available */
+  /** True when WebGL2 and getUserMedia are both present. */
   supported: boolean
-  /** List of missing required features */
+  /** Display names of the missing required features. */
   missing: string[]
 }
 
+/** A service worker only enables the PWA, so `supported` ignores it. */
 export function checkBrowserSupport(): BrowserSupport {
   const webgl2 = checkWebGL2()
   const mediaDevices = checkMediaDevices()

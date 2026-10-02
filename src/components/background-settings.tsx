@@ -1,10 +1,5 @@
 'use client'
 
-/**
- * BackgroundSettings - Controls for avatar scene background.
- * Supports solid color, transparent (for OBS), and image backgrounds.
- */
-
 import { type ChangeEvent } from 'react'
 import type { BackgroundType } from '../stores/settings-store'
 import './background-settings.css'
@@ -19,15 +14,10 @@ export interface BackgroundConfig {
 }
 
 export interface BackgroundSettingsProps {
-  /** Current background type */
   type: BackgroundType
-  /** Color for solid background */
   color?: string
-  /** URL for image background */
   imageUrl?: string
-  /** Callback when settings change */
   onChange: (config: BackgroundConfig) => void
-  /** Whether to show preset colors */
   showPresets?: boolean
 }
 

@@ -1,11 +1,15 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import Error from './error'
+import ErrorPage from './error'
 
 describe('Error page', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
   it('should display error message and try again button', () => {
     const reset = vi.fn()
-    render(<Error error={new Error('Test error')} reset={reset} />)
+    render(<ErrorPage error={new Error('Test error')} reset={reset} />)
 
     expect(screen.getByText('Something went wrong')).toBeInTheDocument()
     expect(screen.getByText('An unexpected error occurred. Please try again.')).toBeInTheDocument()
@@ -14,18 +18,23 @@ describe('Error page', () => {
 
   it('should call reset when Try Again is clicked', () => {
     const reset = vi.fn()
-    render(<Error error={new Error('Test error')} reset={reset} />)
+    render(<ErrorPage error={new Error('Test error')} reset={reset} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Try Again' }))
     expect(reset).toHaveBeenCalledOnce()
   })
 
   it('should not show error details in production mode', () => {
-    // In test environment NODE_ENV is 'test', not 'development',
-    // so error details should be hidden (same as production)
-    const reset = vi.fn()
-    render(<Error error={new Error('Secret error info')} reset={reset} />)
+    vi.stubEnv('NODE_ENV', 'production')
+    render(<ErrorPage error={new Error('Secret error info')} reset={vi.fn()} />)
 
     expect(screen.queryByText('Secret error info')).not.toBeInTheDocument()
+  })
+
+  it('shows error details in development mode', () => {
+    vi.stubEnv('NODE_ENV', 'development')
+    render(<ErrorPage error={new Error('Secret error info')} reset={vi.fn()} />)
+
+    expect(screen.getByText('Secret error info')).toBeInTheDocument()
   })
 })

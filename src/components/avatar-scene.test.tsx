@@ -1,16 +1,28 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, onTestFinished } from 'vitest'
 import { render, screen, act } from '@testing-library/react'
-import { AvatarScene } from './avatar-scene'
+import { StrictMode, createRef } from 'react'
+import { AvatarScene, type AvatarSceneHandle } from './avatar-scene'
 
-// Track renderer instances for testing
-const rendererInstances: { dispose: ReturnType<typeof vi.fn> }[] = []
+const rendererInstances: {
+  render: ReturnType<typeof vi.fn>
+  setClearColor: ReturnType<typeof vi.fn>
+  dispose: ReturnType<typeof vi.fn>
+  forceContextLoss: ReturnType<typeof vi.fn>
+  domElement: HTMLCanvasElement & { toBlob: ReturnType<typeof vi.fn> }
+}[] = []
+const sceneInstances: { background: unknown }[] = []
+const timerInstances: { update: ReturnType<typeof vi.fn> }[] = []
+const controlsInstances: { target: { set: ReturnType<typeof vi.fn> } }[] = []
 
-// Mock Three.js with proper classes
 vi.mock('three', () => {
   class MockScene {
     background = null
     add = vi.fn()
     remove = vi.fn()
+
+    constructor() {
+      sceneInstances.push(this)
+    }
   }
   class MockPerspectiveCamera {
     position = { set: vi.fn(), y: 1.3, z: 1.5 }
@@ -19,12 +31,15 @@ vi.mock('three', () => {
     lookAt = vi.fn()
   }
   class MockWebGLRenderer {
-    domElement = document.createElement('canvas')
+    domElement = Object.assign(document.createElement('canvas'), {
+      toBlob: vi.fn((callback: BlobCallback) => callback(new Blob(['jpeg'], { type: 'image/jpeg' }))),
+    })
     setSize = vi.fn()
     setPixelRatio = vi.fn()
     setClearColor = vi.fn()
     render = vi.fn()
     dispose = vi.fn()
+    forceContextLoss = vi.fn()
 
     constructor() {
       rendererInstances.push(this)
@@ -46,8 +61,13 @@ vi.mock('three', () => {
     getCenter = vi.fn().mockReturnValue(new MockVector3())
     getSize = vi.fn().mockReturnValue(new MockVector3())
   }
-  class MockClock {
-    getDelta = vi.fn().mockReturnValue(0.016) // ~60fps
+  class MockTimer {
+    update = vi.fn().mockReturnThis()
+    getDelta = vi.fn().mockReturnValue(0.016)
+
+    constructor() {
+      timerInstances.push(this)
+    }
   }
 
   return {
@@ -59,11 +79,10 @@ vi.mock('three', () => {
     Color: MockColor,
     Vector3: MockVector3,
     Box3: MockBox3,
-    Clock: MockClock,
+    Timer: MockTimer,
   }
 })
 
-// Mock OrbitControls
 vi.mock('three/addons/controls/OrbitControls.js', () => {
   class MockOrbitControls {
     target = { set: vi.fn() }
@@ -75,6 +94,10 @@ vi.mock('three/addons/controls/OrbitControls.js', () => {
     minPolarAngle = 0
     update = vi.fn()
     dispose = vi.fn()
+
+    constructor() {
+      controlsInstances.push(this)
+    }
   }
   return { OrbitControls: MockOrbitControls }
 })
@@ -113,38 +136,31 @@ describe('AvatarScene', () => {
   })
 
   it('should not recreate renderer when background color changes', () => {
-    // Clear the tracker
     rendererInstances.length = 0
 
     const { rerender, unmount } = render(
       <AvatarScene backgroundType="solid" backgroundColor="#000000" />
     )
 
-    // Should have created exactly one renderer
     expect(rendererInstances).toHaveLength(1)
     const renderer = rendererInstances[0]
 
-    // Change background color multiple times
     rerender(<AvatarScene backgroundType="solid" backgroundColor="#ff0000" />)
     rerender(<AvatarScene backgroundType="solid" backgroundColor="#00ff00" />)
 
-    // Should still be the same single renderer (not recreated)
     expect(rendererInstances).toHaveLength(1)
 
-    // Renderer should NOT have been disposed during rerender
     expect(renderer.dispose).not.toHaveBeenCalled()
 
-    // Unmount to trigger cleanup
     unmount()
 
-    // Now dispose should be called once (cleanup)
     expect(renderer.dispose).toHaveBeenCalledTimes(1)
+    expect(renderer.forceContextLoss).toHaveBeenCalledTimes(1)
   })
 
   it('should call onAutoFrame only once per VRM load', () => {
     const onAutoFrame = vi.fn()
 
-    // Create a mock VRM
     const mockVRM = {
       scene: {
         traverse: vi.fn(),
@@ -169,10 +185,8 @@ describe('AvatarScene', () => {
       />
     )
 
-    // First render with VRM should call onAutoFrame once
     expect(onAutoFrame).toHaveBeenCalledTimes(1)
 
-    // Re-render with same VRM should NOT call onAutoFrame again
     rerender(
       <AvatarScene
         vrm={mockVRM as never}
@@ -181,7 +195,6 @@ describe('AvatarScene', () => {
       />
     )
 
-    // Should still be 1, not 2
     expect(onAutoFrame).toHaveBeenCalledTimes(1)
   })
 
@@ -224,7 +237,6 @@ describe('AvatarScene', () => {
 
     expect(onAutoFrame).toHaveBeenCalledTimes(1)
 
-    // Load a different VRM
     rerender(
       <AvatarScene
         vrm={mockVRM2 as never}
@@ -233,7 +245,6 @@ describe('AvatarScene', () => {
       />
     )
 
-    // Should be called again for the new VRM
     expect(onAutoFrame).toHaveBeenCalledTimes(2)
   })
 
@@ -264,15 +275,11 @@ describe('AvatarScene', () => {
     expect(onAutoFrame).not.toHaveBeenCalled()
   })
 
-  it('should initialize orbit controls when enableOrbitControls is true', async () => {
-    // We can verify OrbitControls is set up by checking if the component
-    // accepts the prop without errors
-    const { container } = render(
-      <AvatarScene enableOrbitControls={true} />
-    )
+  it('creates orbit controls', () => {
+    controlsInstances.length = 0
+    render(<AvatarScene />)
 
-    // Component should render without errors
-    expect(screen.getByTestId('avatar-scene')).toBeDefined()
+    expect(controlsInstances).toHaveLength(1)
   })
 
   it('should rotate VRM 0.x to face camera, leave VRM 1.x as-is', () => {
@@ -305,10 +312,8 @@ describe('AvatarScene', () => {
   it('should show context lost overlay when WebGL context is lost', () => {
     render(<AvatarScene />)
 
-    // Context lost overlay should not be visible initially
     expect(screen.queryByTestId('context-lost-overlay')).not.toBeInTheDocument()
 
-    // Simulate context loss on the canvas
     const container = screen.getByTestId('avatar-scene')
     const canvas = container.querySelector('canvas')
     expect(canvas).toBeTruthy()
@@ -321,7 +326,6 @@ describe('AvatarScene', () => {
     expect(screen.getByTestId('context-lost-overlay')).toBeInTheDocument()
     expect(screen.getByText('WebGL context lost')).toBeInTheDocument()
 
-    // Simulate context restore
     act(() => {
       const event = new Event('webglcontextrestored')
       canvas!.dispatchEvent(event)
@@ -347,7 +351,6 @@ describe('AvatarScene', () => {
       update: vi.fn(),
     }
 
-    // Initial render
     const { rerender } = render(
       <AvatarScene
         vrm={mockVRM as never}
@@ -359,7 +362,6 @@ describe('AvatarScene', () => {
     expect(onAutoFrame1).toHaveBeenCalledTimes(1)
     expect(onAutoFrame2).not.toHaveBeenCalled()
 
-    // Change callback - should NOT trigger auto-frame again for same VRM
     rerender(
       <AvatarScene
         vrm={mockVRM as never}
@@ -368,9 +370,109 @@ describe('AvatarScene', () => {
       />
     )
 
-    // onAutoFrame1 should still be 1 (not called again)
-    // onAutoFrame2 should be 0 (auto-frame already happened for this VRM)
     expect(onAutoFrame1).toHaveBeenCalledTimes(1)
     expect(onAutoFrame2).not.toHaveBeenCalled()
+  })
+})
+
+describe('AvatarScene lifecycle', () => {
+  beforeEach(() => {
+    rendererInstances.length = 0
+    controlsInstances.length = 0
+  })
+
+  it('leaves only the live canvas in the container after a StrictMode remount', () => {
+    render(
+      <StrictMode>
+        <AvatarScene />
+      </StrictMode>
+    )
+
+    const canvases = screen.getByTestId('avatar-scene').querySelectorAll('canvas')
+    expect(canvases).toHaveLength(1)
+    const owner = rendererInstances.find((r) => r.domElement === canvases[0])
+    expect(owner?.dispose).not.toHaveBeenCalled()
+  })
+
+  it('points OrbitControls at the new camera height', () => {
+    const { rerender } = render(<AvatarScene cameraY={1.3} cameraZ={1.5} />)
+    rerender(<AvatarScene cameraY={2} cameraZ={1.5} />)
+
+    expect(controlsInstances[0].target.set).toHaveBeenLastCalledWith(0, 2, 0)
+  })
+
+  it('points OrbitControls at the head after auto-framing', () => {
+    const mockVRM = {
+      scene: { traverse: vi.fn(), rotation: { y: 0 } },
+      humanoid: {
+        getNormalizedBoneNode: vi.fn().mockReturnValue({
+          getWorldPosition: vi.fn((vec) => {
+            vec.y = 1.45
+            return vec
+          }),
+        }),
+      },
+      update: vi.fn(),
+    }
+
+    render(<AvatarScene vrm={mockVRM as never} autoFrameOnLoad={true} />)
+
+    expect(controlsInstances[0].target.set).toHaveBeenLastCalledWith(0, 1.45, 0)
+  })
+
+  it('advances the VRM by the Timer delta on each drawn frame', () => {
+    const frames: FrameRequestCallback[] = []
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => frames.push(cb))
+    vi.stubGlobal('cancelAnimationFrame', () => {})
+    onTestFinished(() => {
+      vi.unstubAllGlobals()
+    })
+    timerInstances.length = 0
+    const mockVRM = { scene: { traverse: vi.fn(), rotation: { y: 0 } }, update: vi.fn() }
+
+    render(<AvatarScene vrm={mockVRM as never} autoFrameOnLoad={false} drawingFps={60} />)
+    frames.splice(0).forEach((cb) => cb(100))
+
+    expect(timerInstances[0].update).toHaveBeenCalledWith(100)
+    expect(mockVRM.update).toHaveBeenCalledWith(0.016)
+  })
+
+  it('captures a thumbnail from a frame drawn in the same task', async () => {
+    const ref = createRef<AvatarSceneHandle>()
+    render(<AvatarScene ref={ref} />)
+    const renderer = rendererInstances[0]
+    renderer.render.mockClear()
+
+    const blob = ref.current!.captureThumbnail()
+
+    // The drawing buffer is not preserved, so toBlob() must run before the browser composites.
+    expect(renderer.render).toHaveBeenCalledTimes(1)
+    expect(renderer.domElement.toBlob).toHaveBeenCalledWith(expect.any(Function), 'image/jpeg', 0.7)
+    expect(renderer.render.mock.invocationCallOrder[0])
+      .toBeLessThan(renderer.domElement.toBlob.mock.invocationCallOrder[0])
+    await expect(blob).resolves.toBeInstanceOf(Blob)
+  })
+})
+
+describe('AvatarScene background', () => {
+  beforeEach(() => {
+    rendererInstances.length = 0
+    sceneInstances.length = 0
+  })
+
+  it('shows an image background through a transparent canvas', () => {
+    render(<AvatarScene backgroundType="image" backgroundImageUrl="blob:http://localhost/bg" />)
+
+    expect(screen.getByTestId('avatar-scene').style.backgroundImage).toContain('blob:http://localhost/bg')
+    expect(sceneInstances[0].background).toBeNull()
+    expect(rendererInstances[0].setClearColor).toHaveBeenLastCalledWith(0x000000, 0)
+  })
+
+  it('falls back to the solid color when the image URL is missing', () => {
+    render(<AvatarScene backgroundType="image" backgroundColor="#00ff00" />)
+
+    expect(screen.getByTestId('avatar-scene').style.backgroundImage).toBe('')
+    expect(sceneInstances[0].background).not.toBeNull()
+    expect(rendererInstances[0].setClearColor).toHaveBeenLastCalledWith(0x000000, 1)
   })
 })

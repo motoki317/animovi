@@ -1,13 +1,13 @@
-/**
- * Global error handler for unhandled errors and promise rejections.
- * Logs to console in development; could be extended with external reporting.
- */
-
 export type ErrorHandler = (event: { type: string; message: string; error?: Error }) => void
 
 let installed = false
 let handler: ErrorHandler | null = null
 
+/**
+ * Logs each unhandled error and promise rejection with console.error in every
+ * build, then passes it to `onError`. A second install does nothing until the
+ * cleanup of the first one runs.
+ */
 export function installGlobalErrorHandler(onError?: ErrorHandler): () => void {
   if (installed) return () => {}
 

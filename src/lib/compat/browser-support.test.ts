@@ -1,23 +1,18 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { checkBrowserSupport, type BrowserSupport } from './browser-support'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { checkBrowserSupport } from './browser-support'
 
 describe('checkBrowserSupport', () => {
-  const originalNavigator = globalThis.navigator
-  const originalDocument = globalThis.document
-
   afterEach(() => {
     vi.restoreAllMocks()
   })
 
   it('should detect full support when all APIs are available', () => {
-    // Default jsdom environment has most APIs mocked
     vi.stubGlobal('navigator', {
       ...navigator,
       mediaDevices: { getUserMedia: vi.fn() },
       serviceWorker: {},
     })
 
-    // Mock WebGL2
     const mockCanvas = {
       getContext: vi.fn().mockReturnValue({}),
     }
@@ -64,7 +59,6 @@ describe('checkBrowserSupport', () => {
   })
 
   it('should still be usable without Service Worker (non-critical)', () => {
-    // Create a navigator without serviceWorker property entirely
     const nav = { mediaDevices: { getUserMedia: vi.fn() } }
     vi.stubGlobal('navigator', nav)
 
@@ -73,7 +67,6 @@ describe('checkBrowserSupport', () => {
 
     const support = checkBrowserSupport()
     expect(support.serviceWorker).toBe(false)
-    // Still supported — SW is not required
     expect(support.supported).toBe(true)
   })
 })
