@@ -1,11 +1,6 @@
-/**
- * Shared MediaPipe configuration constants.
- * Pinned version and model URLs used by both main-thread tracker and Web Worker.
- */
-
-// Must match the installed @mediapipe/tasks-vision package: the JS glue loads a
-// matching WASM runtime from this CDN path, and a version skew between them is
-// unsupported.
+// The npm package supplies the JS API, and WASM_BASE_PATH supplies the WASM
+// loader and binary that the API calls into. Both must come from one release,
+// so constants.test.ts checks this value against the installed package.
 export const MEDIAPIPE_VERSION = '0.10.35'
 
 export const WASM_BASE_PATH =
