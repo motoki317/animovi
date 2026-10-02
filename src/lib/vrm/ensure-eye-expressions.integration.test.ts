@@ -1,16 +1,10 @@
 /**
- * Integration check against the real `.local/test2.vrm` file.
+ * Runs ensureEyelidExpressions against the morph names in `.local/test2.vrm`.
+ * GLTFLoader did not finish in jsdom: it hung while it decoded the embedded
+ * textures. The test therefore reads the morph names from the GLB JSON chunk
+ * and builds a minimal VRM-shaped object.
  *
- * GLTFLoader cannot complete in jsdom (it hangs decoding embedded textures),
- * so instead of running the full loader we parse the GLB JSON chunk ourselves
- * to obtain the authentic mesh morph-target names. We then synthesize a
- * minimal VRM-shaped object and run the helper against it.
- *
- * This pinpoints the mapping between the test2.vrm's authoring names
- * (まばたき / ウィンク / ウィンク右) and the VRM 1.x preset expressions
- * (blink / blinkLeft / blinkRight) the rest of the app expects.
- *
- * Skips automatically if the local VRM is not present.
+ * The suite skips when the file is absent.
  */
 
 import { describe, it, expect, vi } from 'vitest'
@@ -41,13 +35,12 @@ describe.skipIf(!hasFile)('ensureEyelidExpressions vs real test2.vrm', () => {
   it('discovers Japanese eyelid morphs and registers all three blink presets', () => {
     const glb = readGlbJson(TEST_VRM)
 
-    // Sanity: confirm this VRM still lacks blink presets (the precondition for our fix)
+    // The helper matters only for a VRM without blink presets.
     const preset = glb.extensions?.VRMC_vrm?.expressions?.preset ?? {}
     expect(preset.blink).toBeUndefined()
     expect(preset.blinkLeft).toBeUndefined()
     expect(preset.blinkRight).toBeUndefined()
 
-    // Build mock meshes mirroring the real GLB target names
     const meshes = (glb.meshes ?? [])
       .filter((m) => m.extras?.targetNames?.length)
       .map((m) => {
@@ -72,12 +65,10 @@ describe.skipIf(!hasFile)('ensureEyelidExpressions vs real test2.vrm', () => {
 
     ensureEyelidExpressions(vrm)
 
-    // All three should now exist
     expect(expressionMap.blinkLeft).toBeDefined()
     expect(expressionMap.blinkRight).toBeDefined()
     expect(expressionMap.blink).toBeDefined()
 
-    // Each one should bind to the right Japanese morph
     const blinkLeftBind = expressionMap.blinkLeft.binds[0] as VRMExpressionMorphTargetBind
     const blinkRightBind = expressionMap.blinkRight.binds[0] as VRMExpressionMorphTargetBind
     const blinkBind = expressionMap.blink.binds[0] as VRMExpressionMorphTargetBind
@@ -90,7 +81,7 @@ describe.skipIf(!hasFile)('ensureEyelidExpressions vs real test2.vrm', () => {
     expect(dictForBind(blinkRightBind)).toBe('ウィンク右')
     expect(dictForBind(blinkBind)).toBe('まばたき')
 
-    // Direct-bind path uses full weight (not the half-weight fallback)
+    // Direct binds use weight 1. The both-eyes fallback uses 0.5.
     expect(blinkLeftBind.weight).toBe(1.0)
     expect(blinkRightBind.weight).toBe(1.0)
   })

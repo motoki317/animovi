@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import 'fake-indexeddb/auto'
 import {
   saveVRM,
@@ -11,19 +11,16 @@ import {
   MAX_STORED_VRMS,
 } from './vrm-storage'
 
-// Helper to create a test ArrayBuffer of given byte length
 function createBuffer(byteLength: number): ArrayBuffer {
   return new ArrayBuffer(byteLength)
 }
 
-// Helper to create a test Blob
 function createThumbnail(): Blob {
   return new Blob(['thumb'], { type: 'image/jpeg' })
 }
 
 describe('vrm-storage', () => {
   beforeEach(async () => {
-    // Clear all databases between tests
     const dbs = await indexedDB.databases()
     for (const db of dbs) {
       if (db.name) indexedDB.deleteDatabase(db.name)
@@ -86,12 +83,10 @@ describe('vrm-storage', () => {
       expect(list).toHaveLength(2)
       expect(list[0].name).toBe('a.vrm')
       expect(list[1].name).toBe('b.vrm')
-      // Should not include the heavy ArrayBuffer data
       for (const entry of list) {
         expect(entry).not.toHaveProperty('data')
         expect(entry.id).toBeTypeOf('number')
-        // fake-indexeddb doesn't fully support Blob structured cloning,
-        // so we just check the property exists (real browsers handle Blob fine)
+        // A jsdom Blob comes back from fake-indexeddb as a plain object.
         expect(entry).toHaveProperty('thumbnail')
         expect(entry.createdAt).toBeTypeOf('number')
         expect(entry.lastUsedAt).toBeTypeOf('number')
@@ -109,7 +104,7 @@ describe('vrm-storage', () => {
       const id = await saveVRM(createBuffer(100), createThumbnail(), 'test.vrm', 100)
       const before = (await loadVRM(id))!.lastUsedAt
 
-      // Wait a tick to ensure timestamp differs
+      // Let Date.now() advance.
       await new Promise((r) => setTimeout(r, 10))
       await updateLastUsed(id)
 
@@ -147,7 +142,7 @@ describe('vrm-storage', () => {
       await new Promise((r) => setTimeout(r, 10))
       const id3 = await saveVRM(createBuffer(100), createThumbnail(), 'newest.vrm', 100)
 
-      // Exclude the oldest — should evict the next oldest (id2)
+      // With id1 excluded, id2 is the oldest.
       await evictOldest(id1)
 
       expect(await loadVRM(id1)).not.toBeNull()
@@ -158,7 +153,6 @@ describe('vrm-storage', () => {
 
   describe('LRU eviction at capacity', () => {
     it('should auto-evict when importing beyond MAX_STORED_VRMS', async () => {
-      // Fill to capacity
       const ids: number[] = []
       for (let i = 0; i < MAX_STORED_VRMS; i++) {
         await new Promise((r) => setTimeout(r, 5))
@@ -166,12 +160,10 @@ describe('vrm-storage', () => {
       }
       expect(await getVRMCount()).toBe(MAX_STORED_VRMS)
 
-      // Import one more — should evict the first (oldest lastUsedAt)
       await new Promise((r) => setTimeout(r, 5))
       await saveVRM(createBuffer(100), createThumbnail(), 'overflow.vrm', 100)
 
       expect(await getVRMCount()).toBe(MAX_STORED_VRMS)
-      // First entry should be evicted
       expect(await loadVRM(ids[0])).toBeNull()
     })
 
@@ -180,12 +172,31 @@ describe('vrm-storage', () => {
     })
   })
 
-  describe('graceful degradation', () => {
+  describe('empty store', () => {
     it('should handle operations when store is empty', async () => {
-      // evictOldest on empty store should not throw
       await expect(evictOldest()).resolves.not.toThrow()
-      // deleteVRM on non-existent ID should not throw
       await expect(deleteVRM(9999)).resolves.not.toThrow()
+    })
+  })
+
+  describe('commit failure', () => {
+    afterEach(() => {
+      vi.restoreAllMocks()
+    })
+
+    // A quota error aborts the transaction after the add request succeeded.
+    it('rejects saveVRM when the transaction aborts after the add succeeded', async () => {
+      const add = IDBObjectStore.prototype.add
+      vi.spyOn(IDBObjectStore.prototype, 'add').mockImplementation(function (
+        this: IDBObjectStore,
+        ...args: Parameters<IDBObjectStore['add']>
+      ) {
+        const request = add.apply(this, args)
+        request.addEventListener('success', () => this.transaction.abort())
+        return request
+      })
+
+      await expect(saveVRM(createBuffer(100), createThumbnail(), 'a.vrm', 100)).rejects.toThrow()
     })
   })
 })

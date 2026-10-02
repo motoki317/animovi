@@ -1,8 +1,3 @@
-/**
- * VRM Storage - IndexedDB persistence layer for VRM files.
- * Stores VRM ArrayBuffers with thumbnails, supports LRU eviction.
- */
-
 export const MAX_STORED_VRMS = 10
 
 const DB_NAME = 'animovi-vrm'
@@ -46,22 +41,24 @@ function openDB(): Promise<IDBDatabase> {
   })
 }
 
-function withStore<T>(
+// Settles on commit, not on request success. A quota error arrives only as an
+// abort, after every request in the transaction already succeeded.
+function transact<T>(
   mode: IDBTransactionMode,
-  fn: (store: IDBObjectStore) => IDBRequest<T>
+  run: (store: IDBObjectStore) => () => T
 ): Promise<T> {
   return openDB().then(
     (db) =>
       new Promise<T>((resolve, reject) => {
         const tx = db.transaction(STORE_NAME, mode)
-        const store = tx.objectStore(STORE_NAME)
-        const request = fn(store)
-        request.onsuccess = () => resolve(request.result)
-        request.onerror = () => reject(request.error)
-        tx.oncomplete = () => db.close()
-        tx.onerror = () => {
+        const readResult = run(tx.objectStore(STORE_NAME))
+        tx.oncomplete = () => {
           db.close()
-          reject(tx.error)
+          resolve(readResult())
+        }
+        tx.onabort = () => {
+          db.close()
+          reject(tx.error ?? new Error('IndexedDB transaction aborted'))
         }
       })
   )
@@ -73,35 +70,39 @@ export async function saveVRM(
   name: string,
   size: number
 ): Promise<number> {
-  const count = await getVRMCount()
-  if (count >= MAX_STORED_VRMS) {
+  // No excludeId: the VRM being saved is the active one and is not stored yet,
+  // so eviction cannot remove the active VRM.
+  if ((await getVRMCount()) >= MAX_STORED_VRMS) {
     await evictOldest()
   }
 
   const now = Date.now()
   const entry = { data, thumbnail, name, size, createdAt: now, lastUsedAt: now }
-  const id = await withStore<IDBValidKey>('readwrite', (store) => store.add(entry))
-  return id as number
+  return transact('readwrite', (store) => {
+    const request = store.add(entry)
+    return () => request.result as number
+  })
 }
 
-export async function loadVRM(id: number): Promise<StoredVRM | null> {
-  const result = await withStore<StoredVRM | undefined>('readonly', (store) => store.get(id))
-  return result ?? null
+export function loadVRM(id: number): Promise<StoredVRM | null> {
+  return transact('readonly', (store) => {
+    const request = store.get(id)
+    return () => (request.result as StoredVRM | undefined) ?? null
+  })
 }
 
-export async function deleteVRM(id: number): Promise<void> {
-  await withStore<undefined>('readwrite', (store) => store.delete(id))
+export function deleteVRM(id: number): Promise<void> {
+  return transact('readwrite', (store) => {
+    store.delete(id)
+    return () => undefined
+  })
 }
 
-export async function listVRMs(): Promise<VRMMeta[]> {
-  const db = await openDB()
-  return new Promise<VRMMeta[]>((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readonly')
-    const store = tx.objectStore(STORE_NAME)
+export function listVRMs(): Promise<VRMMeta[]> {
+  return transact('readonly', (store) => {
     const request = store.getAll()
-    request.onsuccess = () => {
-      const entries: StoredVRM[] = request.result
-      const metas: VRMMeta[] = entries.map(({ id, name, size, createdAt, lastUsedAt, thumbnail }) => ({
+    return () =>
+      (request.result as StoredVRM[]).map(({ id, name, size, createdAt, lastUsedAt, thumbnail }) => ({
         id,
         name,
         size,
@@ -109,91 +110,46 @@ export async function listVRMs(): Promise<VRMMeta[]> {
         lastUsedAt,
         thumbnail,
       }))
-      resolve(metas)
-    }
-    request.onerror = () => reject(request.error)
-    tx.oncomplete = () => db.close()
   })
 }
 
-export async function updateLastUsed(id: number): Promise<void> {
-  const db = await openDB()
-  return new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite')
-    const store = tx.objectStore(STORE_NAME)
-    const getReq = store.get(id)
-    getReq.onsuccess = () => {
-      if (getReq.result) {
-        const entry = getReq.result
-        entry.lastUsedAt = Date.now()
-        store.put(entry)
-      }
-      resolve()
+function updateEntry(id: number, patch: Partial<StoredVRM>): Promise<void> {
+  return transact('readwrite', (store) => {
+    const request = store.get(id)
+    request.onsuccess = () => {
+      if (request.result) store.put({ ...request.result, ...patch })
     }
-    getReq.onerror = () => reject(getReq.error)
-    tx.oncomplete = () => db.close()
-    tx.onerror = () => {
-      db.close()
-      reject(tx.error)
-    }
+    return () => undefined
   })
 }
 
-export async function updateThumbnail(id: number, thumbnail: Blob): Promise<void> {
-  const db = await openDB()
-  return new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite')
-    const store = tx.objectStore(STORE_NAME)
-    const getReq = store.get(id)
-    getReq.onsuccess = () => {
-      if (getReq.result) {
-        const entry = getReq.result
-        entry.thumbnail = thumbnail
-        store.put(entry)
-      }
-      resolve()
-    }
-    getReq.onerror = () => reject(getReq.error)
-    tx.oncomplete = () => db.close()
-    tx.onerror = () => {
-      db.close()
-      reject(tx.error)
-    }
+export function updateLastUsed(id: number): Promise<void> {
+  return updateEntry(id, { lastUsedAt: Date.now() })
+}
+
+export function updateThumbnail(id: number, thumbnail: Blob): Promise<void> {
+  return updateEntry(id, { thumbnail })
+}
+
+export function getVRMCount(): Promise<number> {
+  return transact('readonly', (store) => {
+    const request = store.count()
+    return () => request.result
   })
 }
 
-export async function getVRMCount(): Promise<number> {
-  return withStore<number>('readonly', (store) => store.count())
-}
-
-export async function evictOldest(excludeId?: number): Promise<void> {
-  const db = await openDB()
-  return new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite')
-    const store = tx.objectStore(STORE_NAME)
-    const index = store.index('lastUsedAt')
-    const request = index.openCursor()
+export function evictOldest(excludeId?: number): Promise<void> {
+  return transact('readwrite', (store) => {
+    const request = store.index('lastUsedAt').openCursor()
     request.onsuccess = () => {
       const cursor = request.result
-      if (!cursor) {
-        // No entries to evict
-        resolve()
-        return
-      }
-      const entry = cursor.value as StoredVRM
-      if (excludeId !== undefined && entry.id === excludeId) {
-        // Skip excluded, try next
+      if (!cursor) return
+      if ((cursor.value as StoredVRM).id === excludeId) {
         cursor.continue()
         return
       }
       cursor.delete()
-      resolve()
     }
-    request.onerror = () => reject(request.error)
-    tx.oncomplete = () => db.close()
-    tx.onerror = () => {
-      db.close()
-      reject(tx.error)
-    }
+    return () => undefined
   })
 }

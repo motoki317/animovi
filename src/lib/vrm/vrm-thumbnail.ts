@@ -1,7 +1,4 @@
-/**
- * VRM Thumbnail - Captures a JPEG screenshot from the Three.js canvas.
- */
-
+/** Rejects when toBlob() yields null, for example for a zero-size canvas. */
 export function captureThumbnail(canvas: HTMLCanvasElement): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob(

@@ -1,13 +1,14 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { renderHook, act } from '@testing-library/react'
-import { useVRMLoader } from './use-vrm-loader'
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest'
+import { createElement, useEffect } from 'react'
+import { render, renderHook, act } from '@testing-library/react'
+import { BufferGeometry, Group, Mesh, Texture } from 'three'
+import { MToonMaterial, VRMUtils, type VRM } from '@pixiv/three-vrm'
+import { useVRMLoader, type UseVRMLoaderResult } from './use-vrm-loader'
 import type { StoredVRM } from '../lib/vrm/vrm-storage'
 
-// Mock VRM instance
 const createMockVRM = () => ({
   scene: {
     traverse: vi.fn((callback: (obj: unknown) => void) => {
-      // Simulate traversing a mesh with geometry and material
       callback({
         geometry: { dispose: vi.fn() },
         material: { dispose: vi.fn() },
@@ -17,22 +18,22 @@ const createMockVRM = () => ({
   meta: { name: 'Test VRM' },
 })
 
-// Mock GLTFLoader load function - will be set per test
-let mockGLTFLoad: ReturnType<typeof vi.fn>
+const vrmFile = () => new File(['vrm'], 'avatar.vrm')
 
-// Mock three.js and VRM loader
-vi.mock('three', () => ({
-  LoadingManager: vi.fn(() => ({
-    onProgress: null,
-    onError: null,
-  })),
-}))
+type GLTFLoad = (
+  url: string,
+  onLoad: (gltf: unknown) => void,
+  onProgress: (event: { loaded: number; total: number }) => void,
+  onError: (error: Error) => void,
+) => void
 
-vi.mock('@pixiv/three-vrm', () => ({
+let mockGLTFLoad: Mock<GLTFLoad>
+
+vi.mock('@pixiv/three-vrm', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@pixiv/three-vrm')>()),
   VRMLoaderPlugin: vi.fn(),
 }))
 
-// Mock VRM storage
 const mockSaveVRM = vi.fn().mockResolvedValue(1)
 const mockLoadVRMFromDB = vi.fn().mockResolvedValue(null)
 const mockUpdateLastUsed = vi.fn().mockResolvedValue(undefined)
@@ -48,15 +49,8 @@ vi.mock('three/addons/loaders/GLTFLoader.js', () => ({
     register() {
       return this
     }
-    load(
-      url: string,
-      onLoad: (gltf: unknown) => void,
-      onProgress?: (event: { loaded: number; total: number }) => void,
-      onError?: (error: Error) => void
-    ) {
-      if (mockGLTFLoad) {
-        mockGLTFLoad(url, onLoad, onProgress, onError)
-      }
+    load(...args: Parameters<GLTFLoad>) {
+      mockGLTFLoad(...args)
     }
   },
 }))
@@ -64,7 +58,9 @@ vi.mock('three/addons/loaders/GLTFLoader.js', () => ({
 describe('useVRMLoader', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockGLTFLoad = vi.fn()
+    mockGLTFLoad = vi.fn<GLTFLoad>()
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock')
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
   })
 
   afterEach(() => {
@@ -78,24 +74,6 @@ describe('useVRMLoader', () => {
     expect(result.current.loading).toBe(false)
     expect(result.current.error).toBeNull()
     expect(result.current.progress).toBe(0)
-  })
-
-  it('should load VRM file from URL using GLTFLoader', async () => {
-    const mockVRM = createMockVRM()
-
-    mockGLTFLoad.mockImplementation((url, onLoad) => {
-      onLoad({ userData: { vrm: mockVRM } })
-    })
-
-    const { result } = renderHook(() => useVRMLoader())
-
-    await act(async () => {
-      await result.current.loadFromUrl('/models/test.vrm')
-    })
-
-    expect(result.current.vrm).toBe(mockVRM)
-    expect(result.current.loading).toBe(false)
-    expect(result.current.error).toBeNull()
   })
 
   it('should load VRM from File object via URL.createObjectURL', async () => {
@@ -126,28 +104,19 @@ describe('useVRMLoader', () => {
   })
 
   it('should report loading progress (0-100%)', async () => {
-    const mockVRM = createMockVRM()
-    const progressValues: number[] = []
-
-    mockGLTFLoad.mockImplementation((url, onLoad, onProgress) => {
-      // Simulate progress events
+    mockGLTFLoad.mockImplementation((_url, _onLoad, onProgress) => {
       onProgress({ loaded: 25, total: 100 })
-      onProgress({ loaded: 50, total: 100 })
       onProgress({ loaded: 75, total: 100 })
-      onProgress({ loaded: 100, total: 100 })
-      onLoad({ userData: { vrm: mockVRM } })
     })
 
     const { result } = renderHook(() => useVRMLoader())
 
     await act(async () => {
-      const progressPromise = result.current.loadFromUrl('/test.vrm')
-      progressValues.push(result.current.progress)
-      await progressPromise
+      void result.current.loadFromFile(vrmFile())
+      await new Promise((r) => setTimeout(r, 0))
     })
 
-    // Progress should have been updated during loading
-    expect(result.current.progress).toBe(100)
+    expect(result.current.progress).toBe(75)
   })
 
   it('should dispose previous VRM when loading new one', async () => {
@@ -162,19 +131,80 @@ describe('useVRMLoader', () => {
 
     const { result } = renderHook(() => useVRMLoader())
 
-    // Load first VRM
     await act(async () => {
-      await result.current.loadFromUrl('/first.vrm')
+      await result.current.loadFromFile(vrmFile())
     })
     expect(result.current.vrm).toBe(firstVRM)
 
-    // Load second VRM - first should be disposed
     await act(async () => {
-      await result.current.loadFromUrl('/second.vrm')
+      await result.current.loadFromFile(vrmFile())
     })
 
     expect(firstVRM.scene.traverse).toHaveBeenCalled()
     expect(result.current.vrm).toBe(secondVRM)
+  })
+
+  it('disposes the MToon textures of the previous VRM', async () => {
+    // MToon keeps its textures in uniforms behind prototype getters.
+    const texture = new Texture()
+    const disposeTexture = vi.spyOn(texture, 'dispose')
+    const scene = new Group()
+    scene.add(new Mesh(new BufferGeometry(), new MToonMaterial({ map: texture })))
+    mockGLTFLoad
+      .mockImplementationOnce((_url, onLoad) => onLoad({ userData: { vrm: { scene } } }))
+      .mockImplementationOnce((_url, onLoad) => onLoad({ userData: { vrm: createMockVRM() } }))
+
+    const { result } = renderHook(() => useVRMLoader())
+    await act(async () => {
+      await result.current.loadFromFile(vrmFile())
+    })
+    await act(async () => {
+      await result.current.loadFromFile(vrmFile())
+    })
+
+    expect(disposeTexture).toHaveBeenCalled()
+  })
+
+  it('disposes the previous VRM after the scene removes it', async () => {
+    // A frame between the dispose and the removal uploads the disposed
+    // geometries and textures again, and nothing frees them later.
+    const displayScene = new Group()
+    const first = { scene: new Group() }
+    let attachedAtDispose: boolean | undefined
+    vi.spyOn(VRMUtils, 'deepDispose').mockImplementation((object) => {
+      if (object === first.scene) attachedAtDispose = first.scene.parent !== null
+    })
+    mockGLTFLoad
+      .mockImplementationOnce((_url, onLoad) => onLoad({ userData: { vrm: first } }))
+      .mockImplementationOnce((_url, onLoad) => onLoad({ userData: { vrm: { scene: new Group() } } }))
+
+    // Mirrors page.tsx and its child AvatarScene, which adds vrm.scene in an
+    // effect and removes it in the cleanup.
+    function SceneChild({ vrm }: { vrm: VRM | null }) {
+      useEffect(() => {
+        if (!vrm) return
+        displayScene.add(vrm.scene)
+        return () => {
+          displayScene.remove(vrm.scene)
+        }
+      }, [vrm])
+      return null
+    }
+    let loader!: UseVRMLoaderResult
+    function Page() {
+      loader = useVRMLoader()
+      return createElement(SceneChild, { vrm: loader.vrm })
+    }
+    render(createElement(Page))
+
+    await act(async () => {
+      await loader.loadFromFile(vrmFile())
+    })
+    await act(async () => {
+      await loader.loadFromFile(vrmFile())
+    })
+
+    expect(attachedAtDispose).toBe(false)
   })
 
   it('should reject invalid/corrupted VRM files', async () => {
@@ -185,7 +215,7 @@ describe('useVRMLoader', () => {
     const { result } = renderHook(() => useVRMLoader())
 
     await act(async () => {
-      await result.current.loadFromUrl('/invalid.vrm').catch(() => {})
+      await result.current.loadFromFile(vrmFile()).catch(() => {})
     })
 
     expect(result.current.error).not.toBeNull()
@@ -196,14 +226,13 @@ describe('useVRMLoader', () => {
 
   it('should handle GLTF without VRM data', async () => {
     mockGLTFLoad.mockImplementation((url, onLoad) => {
-      // GLTF loaded but no VRM data
       onLoad({ userData: {} })
     })
 
     const { result } = renderHook(() => useVRMLoader())
 
     await act(async () => {
-      await result.current.loadFromUrl('/not-vrm.glb').catch(() => {})
+      await result.current.loadFromFile(vrmFile()).catch(() => {})
     })
 
     expect(result.current.error).not.toBeNull()
@@ -226,14 +255,13 @@ describe('useVRMLoader', () => {
       const { result } = renderHook(() => useVRMLoader())
       const mockBuffer = new ArrayBuffer(8)
       const mockFile = new File(['vrm-data'], 'avatar.vrm', { type: 'model/gltf-binary' })
-      // jsdom File doesn't implement arrayBuffer(), so we add it
       mockFile.arrayBuffer = vi.fn().mockResolvedValue(mockBuffer)
 
       await act(async () => {
         await result.current.loadFromFile(mockFile)
       })
 
-      // Wait for async fire-and-forget save
+      // saveVRM() runs after loadFromFile() resolves.
       await act(async () => {
         await new Promise((r) => setTimeout(r, 0))
       })
@@ -245,6 +273,19 @@ describe('useVRMLoader', () => {
         mockFile.size
       )
       expect(result.current.lastSavedId).toBe(42)
+    })
+
+    it('clears loading when the file read fails', async () => {
+      const { result } = renderHook(() => useVRMLoader())
+      const file = new File([], 'avatar.vrm')
+      file.arrayBuffer = vi.fn().mockRejectedValue(new Error('file read failed'))
+
+      await act(async () => {
+        await result.current.loadFromFile(file).catch(() => {})
+      })
+
+      expect(result.current.loading).toBe(false)
+      expect(result.current.error?.message).toBe('file read failed')
     })
   })
 
@@ -294,6 +335,19 @@ describe('useVRMLoader', () => {
       expect(result.current.error?.message).toBe('VRM not found in storage')
       expect(result.current.loading).toBe(false)
     })
+
+    it('clears loading when the IndexedDB read fails', async () => {
+      mockLoadVRMFromDB.mockRejectedValueOnce(new Error('IndexedDB unavailable'))
+
+      const { result } = renderHook(() => useVRMLoader())
+
+      await act(async () => {
+        await result.current.loadFromStorage(1).catch(() => {})
+      })
+
+      expect(result.current.loading).toBe(false)
+      expect(result.current.error?.message).toBe('IndexedDB unavailable')
+    })
   })
 
   it('should set loading true during load operation', async () => {
@@ -306,7 +360,6 @@ describe('useVRMLoader', () => {
     })
 
     mockGLTFLoad.mockImplementation((url, onLoad) => {
-      // Capture loading state while load is in progress
       loadingDuringLoad = true
       loadPromise.then(() => {
         onLoad({ userData: { vrm: mockVRM } })
@@ -318,13 +371,11 @@ describe('useVRMLoader', () => {
     let outerLoadPromise: Promise<void>
 
     act(() => {
-      outerLoadPromise = result.current.loadFromUrl('/test.vrm')
+      outerLoadPromise = result.current.loadFromFile(vrmFile())
     })
 
-    // After starting load, loading should be true
     expect(result.current.loading).toBe(true)
 
-    // Complete the load
     await act(async () => {
       resolveLoad!()
       await outerLoadPromise!

@@ -78,7 +78,6 @@ describe('ensureEyelidExpressions', () => {
   })
 
   it('falls back to "both eyes" morph for missing L/R with halved weight', () => {
-    // Only a single "both eyes" blink morph exists, no separate L/R
     const body = makeMesh(['まばたき'])
     const vrm = makeVRM([body])
 

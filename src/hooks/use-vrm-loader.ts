@@ -1,24 +1,21 @@
-/**
- * useVRMLoader - React hook for loading VRM models.
- * Uses Three.js GLTFLoader with @pixiv/three-vrm VRMLoaderPlugin.
- */
-
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import type { VRM } from '@pixiv/three-vrm'
-import { VRMLoaderPlugin } from '@pixiv/three-vrm'
+import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { saveVRM, loadVRM as loadVRMFromDB, updateLastUsed } from '../lib/vrm/vrm-storage'
 import { ensureEyelidExpressions } from '../lib/vrm/ensure-eye-expressions'
 
 export interface UseVRMLoaderResult {
+  /** Disposed when a new VRM replaces it or when the hook unmounts. */
   vrm: VRM | null
   loading: boolean
   error: Error | null
+  /** 0 to 100. */
   progress: number
-  loadFromUrl: (url: string) => Promise<void>
+  /** Also saves the file to IndexedDB after the VRM loads. A failed save only logs a warning. */
   loadFromFile: (file: File) => Promise<void>
   loadFromStorage: (id: number) => Promise<void>
-  /** The last saved VRM ID (set after successful file import) */
+  /** IndexedDB ID of the VRM from the last successful file save or storage load. */
   lastSavedId: number | null
 }
 
@@ -30,7 +27,16 @@ export function useVRMLoader(): UseVRMLoaderResult {
   const [lastSavedId, setLastSavedId] = useState<number | null>(null)
   const loaderRef = useRef<GLTFLoader | null>(null)
 
-  // Get or create the loader (singleton per hook instance)
+  // The caller's child AvatarScene removes vrm.scene in its effect cleanup, and
+  // child cleanups run first. Disposing earlier, as in a setVrm updater, leaves
+  // a gap in which a frame uploads the disposed resources again and leaks them.
+  // deepDispose also frees the textures in MToon uniforms, which a walk over
+  // Object.values(material) does not reach.
+  useEffect(() => {
+    if (!vrm) return
+    return () => VRMUtils.deepDispose(vrm.scene)
+  }, [vrm])
+
   const getLoader = useCallback(() => {
     if (!loaderRef.current) {
       loaderRef.current = new GLTFLoader()
@@ -39,33 +45,14 @@ export function useVRMLoader(): UseVRMLoaderResult {
     return loaderRef.current
   }, [])
 
-  // Dispose previous VRM if exists
-  const disposePreviousVRM = useCallback((previousVrm: VRM | null) => {
-    if (previousVrm) {
-      // VRM doesn't have a direct dispose method — traverse and dispose all GPU resources
-      previousVrm.scene.traverse((obj) => {
-        if ('geometry' in obj && obj.geometry) {
-          (obj.geometry as { dispose?: () => void }).dispose?.()
-        }
-        if ('material' in obj && obj.material) {
-          const materials = Array.isArray(obj.material) ? obj.material : [obj.material]
-          for (const mat of materials) {
-            // Dispose textures attached to the material
-            if (mat && typeof mat === 'object') {
-              for (const value of Object.values(mat as Record<string, unknown>)) {
-                if (value && typeof value === 'object' && 'isTexture' in value) {
-                  (value as unknown as { dispose: () => void }).dispose()
-                }
-              }
-              (mat as { dispose?: () => void }).dispose?.()
-            }
-          }
-        }
-      })
-    }
+  // loadVRM settles loading and error itself. This covers the reads before it.
+  const failBeforeLoad = useCallback((cause: unknown): Error => {
+    const errorObj = cause instanceof Error ? cause : new Error(String(cause))
+    setError(errorObj)
+    setLoading(false)
+    return errorObj
   }, [])
 
-  // Core loading logic shared by both loadFromUrl and loadFromFile
   const loadVRM = useCallback(
     (url: string, objectUrlToRevoke?: string): Promise<void> => {
       return new Promise((resolve, reject) => {
@@ -73,9 +60,7 @@ export function useVRMLoader(): UseVRMLoaderResult {
 
         loader.load(
           url,
-          // onLoad
           (gltf) => {
-            // Revoke object URL if it was created for a File
             if (objectUrlToRevoke) {
               URL.revokeObjectURL(objectUrlToRevoke)
             }
@@ -96,18 +81,13 @@ export function useVRMLoader(): UseVRMLoaderResult {
             // morphs but never bind them to the preset expressions.
             ensureEyelidExpressions(loadedVrm)
 
-            // Dispose previous VRM before setting new one
-            setVrm((prev) => {
-              disposePreviousVRM(prev)
-              return loadedVrm
-            })
+            setVrm(loadedVrm)
 
             setProgress(100)
             setLoading(false)
             setError(null)
             resolve()
           },
-          // onProgress
           (progressEvent) => {
             if (progressEvent.total > 0) {
               const percent = Math.round(
@@ -116,9 +96,7 @@ export function useVRMLoader(): UseVRMLoaderResult {
               setProgress(percent)
             }
           },
-          // onError
           (loadError) => {
-            // Revoke object URL even on error
             if (objectUrlToRevoke) {
               URL.revokeObjectURL(objectUrlToRevoke)
             }
@@ -134,17 +112,7 @@ export function useVRMLoader(): UseVRMLoaderResult {
         )
       })
     },
-    [getLoader, disposePreviousVRM]
-  )
-
-  const loadFromUrl = useCallback(
-    async (url: string): Promise<void> => {
-      setLoading(true)
-      setError(null)
-      setProgress(0)
-      return loadVRM(url)
-    },
-    [loadVRM]
+    [getLoader]
   )
 
   const loadFromFile = useCallback(
@@ -153,20 +121,19 @@ export function useVRMLoader(): UseVRMLoaderResult {
       setError(null)
       setProgress(0)
 
-      // Read ArrayBuffer for persistence before loading
-      const arrayBuffer = await file.arrayBuffer()
-      const blob = new Blob([arrayBuffer])
-      const objectUrl = URL.createObjectURL(blob)
+      const arrayBuffer = await file.arrayBuffer().catch((cause) => {
+        throw failBeforeLoad(cause)
+      })
+      const objectUrl = URL.createObjectURL(new Blob([arrayBuffer]))
       await loadVRM(objectUrl, objectUrl)
 
-      // Persist to IndexedDB (fire-and-forget, don't block rendering)
-      // Thumbnail placeholder — real thumbnail captured by page.tsx after first render
+      // page.tsx replaces this empty thumbnail with a canvas capture.
       const placeholderThumb = new Blob([], { type: 'image/jpeg' })
       saveVRM(arrayBuffer, placeholderThumb, file.name, file.size)
         .then((id) => setLastSavedId(id))
         .catch(console.warn)
     },
-    [loadVRM]
+    [loadVRM, failBeforeLoad]
   )
 
   const loadFromStorage = useCallback(
@@ -175,23 +142,20 @@ export function useVRMLoader(): UseVRMLoaderResult {
       setError(null)
       setProgress(0)
 
-      const stored = await loadVRMFromDB(id)
+      const stored = await loadVRMFromDB(id).catch((cause) => {
+        throw failBeforeLoad(cause)
+      })
       if (!stored) {
-        const err = new Error('VRM not found in storage')
-        setError(err)
-        setLoading(false)
-        throw err
+        throw failBeforeLoad(new Error('VRM not found in storage'))
       }
 
-      const blob = new Blob([stored.data])
-      const objectUrl = URL.createObjectURL(blob)
+      const objectUrl = URL.createObjectURL(new Blob([stored.data]))
       await loadVRM(objectUrl, objectUrl)
 
-      // Update last-used timestamp (fire-and-forget)
       updateLastUsed(id).catch(console.warn)
       setLastSavedId(id)
     },
-    [loadVRM]
+    [loadVRM, failBeforeLoad]
   )
 
   return {
@@ -199,7 +163,6 @@ export function useVRMLoader(): UseVRMLoaderResult {
     loading,
     error,
     progress,
-    loadFromUrl,
     loadFromFile,
     loadFromStorage,
     lastSavedId,
