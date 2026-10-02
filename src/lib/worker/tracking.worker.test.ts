@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-// Create hoisted mocks
 const mocks = vi.hoisted(() => ({
   holisticDetectForVideo: vi.fn(),
   holisticClose: vi.fn(),
@@ -50,7 +49,6 @@ describe('TrackingWorker', () => {
     vi.clearAllMocks()
     postedMessages = []
 
-    // Re-setup mocks
     mocks.holisticCreateFromOptions.mockResolvedValue({
       detectForVideo: mocks.holisticDetectForVideo,
       close: mocks.holisticClose,

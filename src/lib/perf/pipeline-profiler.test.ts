@@ -8,7 +8,7 @@ describe('PipelineProfiler', () => {
   beforeEach(() => {
     mockNow = 0
     vi.spyOn(performance, 'now').mockImplementation(() => mockNow)
-    profiler = new PipelineProfiler(5) // Small window for testing
+    profiler = new PipelineProfiler(5)
   })
 
   afterEach(() => {
@@ -41,7 +41,6 @@ describe('PipelineProfiler', () => {
   })
 
   it('should compute rolling average over window', () => {
-    // Add 5 samples: 10, 20, 30, 40, 50
     for (let i = 1; i <= 5; i++) {
       profiler.begin('stage')
       mockNow += i * 10
@@ -49,13 +48,12 @@ describe('PipelineProfiler', () => {
     }
 
     const timings = profiler.getTimings()
-    // Average of 10, 20, 30, 40, 50 = 30
+    // Samples are 10, 20, 30, 40, 50.
     expect(timings.stage.avgMs).toBe(30)
   })
 
   it('should evict old samples beyond window size', () => {
-    // Add 6 samples with window=5: 100, 10, 10, 10, 10, 10
-    // First sample should be evicted
+    // Six samples into a window of 5: 100, then five 10s.
     profiler.begin('stage')
     mockNow += 100
     profiler.end('stage')
@@ -67,7 +65,6 @@ describe('PipelineProfiler', () => {
     }
 
     const timings = profiler.getTimings()
-    // Average of last 5: 10, 10, 10, 10, 10 = 10
     expect(timings.stage.avgMs).toBe(10)
   })
 
@@ -91,7 +88,6 @@ describe('PipelineProfiler', () => {
     mockNow += 3
     profiler.end('b')
 
-    // Total = sum of last values for all stages
     expect(profiler.getTotalMs()).toBe(8)
   })
 
@@ -101,31 +97,18 @@ describe('PipelineProfiler', () => {
     expect(profiler.getTotalMs()).toBe(0)
   })
 
-  it('should reset all data', () => {
-    profiler.begin('stage')
-    mockNow += 10
-    profiler.end('stage')
-
-    profiler.reset()
-
-    const timings = profiler.getTimings()
-    expect(Object.keys(timings)).toHaveLength(0)
-  })
-
   it('should handle end without begin gracefully', () => {
-    // Should not throw
     profiler.end('unknown')
     const timings = profiler.getTimings()
     expect(Object.keys(timings)).toHaveLength(0)
   })
 
   it('should track FPS from frame marks', () => {
-    // Simulate 5 frames at 16.67ms intervals (60fps)
     for (let i = 0; i < 5; i++) {
       profiler.markFrame()
       mockNow += 16.67
     }
-    profiler.markFrame() // Need one more to compute interval
+    profiler.markFrame()
 
     expect(profiler.getFps()).toBeCloseTo(60, 0)
   })

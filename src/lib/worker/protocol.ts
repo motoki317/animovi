@@ -1,10 +1,5 @@
-/**
- * Worker Message Protocol - Types for main thread <-> tracking worker communication.
- */
-
 import type { HolisticResult } from '../solver/holistic-solver'
 
-/** Minimal landmark shape shared by pose/hand/face raw landmarks. */
 export interface RawLandmark {
   x: number
   y: number
@@ -13,9 +8,9 @@ export interface RawLandmark {
 }
 
 /**
- * Raw MediaPipe landmarks attached to a result message when the worker is in debug mode.
- * Image-space (x/y normalized 0-1, z relative). Each field is optional because
- * face-only mode emits no pose/hand data.
+ * MediaPipe image-space landmarks: x and y in [0, 1], z as relative depth.
+ * A field is absent when MediaPipe detects nothing for that part. Face-only
+ * mode never has pose or hand fields.
  */
 export interface RawLandmarks {
   pose?: RawLandmark[]
@@ -24,14 +19,15 @@ export interface RawLandmarks {
   face?: RawLandmark[]
 }
 
-// --- Messages from Main Thread to Worker ---
-
+/**
+ * The main thread sends one `init`, then one `frame` at a time. It transfers
+ * each `bitmap`, and the worker closes it. The worker answers `init` with
+ * `ready` or `error`, and each `frame` with exactly one `result` or `error`.
+ * The main thread waits for that answer before it sends the next frame.
+ */
 export type WorkerInMessage =
   | { type: 'init'; needsPose: boolean; needsHands: boolean }
   | { type: 'frame'; bitmap: ImageBitmap; timestamp: number }
-  | { type: 'set-debug'; enabled: boolean }
-
-// --- Messages from Worker to Main Thread ---
 
 export interface WorkerDetectionInfo {
   hasFace: boolean

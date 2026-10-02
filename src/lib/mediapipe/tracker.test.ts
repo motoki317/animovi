@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { MediaPipeTracker, MediaPipeTrackerOptions } from './tracker'
 
-// Create hoisted mocks that can be accessed inside vi.mock
 const mocks = vi.hoisted(() => ({
   holisticDetectForVideo: vi.fn(),
   holisticSetOptions: vi.fn(),
@@ -196,8 +195,6 @@ describe('MediaPipeTracker', () => {
     it('should support custom options', async () => {
       const options: MediaPipeTrackerOptions = {
         numFaces: 2,
-        numHands: 4,
-        numPoses: 2,
         minFaceDetectionConfidence: 0.7,
         minPoseDetectionConfidence: 0.7,
         minHandDetectionConfidence: 0.7,

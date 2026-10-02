@@ -1,6 +1,6 @@
 /**
- * PipelineProfiler - Tracks per-stage timing for the tracking and rendering pipeline.
- * Provides rolling averages, max values, and FPS tracking.
+ * Per-stage timings in milliseconds over the last `windowSize` samples, and FPS
+ * from the intervals between markFrame() calls.
  */
 
 export interface StageTiming {
@@ -28,7 +28,6 @@ export class PipelineProfiler {
     this.windowSize = windowSize
   }
 
-  /** Start timing a named stage */
   begin(stage: string): void {
     let data = this.stages.get(stage)
     if (!data) {
@@ -38,7 +37,7 @@ export class PipelineProfiler {
     data.startTime = performance.now()
   }
 
-  /** End timing a named stage */
+  /** Does nothing when no begin() is open for the stage. */
   end(stage: string): void {
     const data = this.stages.get(stage)
     if (!data || data.startTime === null) return
@@ -51,7 +50,7 @@ export class PipelineProfiler {
     data.startTime = null
   }
 
-  /** Get timing stats for all tracked stages */
+  /** Omits stages that have no samples. */
   getTimings(): StageTimings {
     const result: StageTimings = {}
     for (const [name, data] of this.stages) {
@@ -67,7 +66,7 @@ export class PipelineProfiler {
     return result
   }
 
-  /** Get total pipeline time (sum of last values for all stages) */
+  /** Sum of the last sample of every stage. */
   getTotalMs(): number {
     let total = 0
     for (const data of this.stages.values()) {
@@ -78,7 +77,6 @@ export class PipelineProfiler {
     return total
   }
 
-  /** Mark a frame boundary for FPS calculation */
   markFrame(): void {
     const now = performance.now()
     if (this.lastFrameTime !== null) {
@@ -90,17 +88,10 @@ export class PipelineProfiler {
     this.lastFrameTime = now
   }
 
-  /** Get current FPS based on frame marks */
+  /** Returns 0 until markFrame() has run twice. */
   getFps(): number {
     if (this.frameTimes.length === 0) return 0
     const avg = this.frameTimes.reduce((s, v) => s + v, 0) / this.frameTimes.length
     return avg > 0 ? 1000 / avg : 0
-  }
-
-  /** Reset all data */
-  reset(): void {
-    this.stages.clear()
-    this.frameTimes = []
-    this.lastFrameTime = null
   }
 }

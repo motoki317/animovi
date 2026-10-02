@@ -3,10 +3,7 @@ import { useTrackingStore, type DebugData } from './tracking-store'
 
 describe('useTrackingStore', () => {
   beforeEach(() => {
-    // Reset store between tests
     useTrackingStore.setState({
-      isTracking: false,
-      result: null,
       debugData: null,
       debugEnabled: false,
       stickFigureEnabled: false,
@@ -16,8 +13,6 @@ describe('useTrackingStore', () => {
   it('should initialize with default values', () => {
     const state = useTrackingStore.getState()
 
-    expect(state.isTracking).toBe(false)
-    expect(state.result).toBeNull()
     expect(state.debugData).toBeNull()
     expect(state.debugEnabled).toBe(false)
     expect(state.stickFigureEnabled).toBe(false)
@@ -26,29 +21,6 @@ describe('useTrackingStore', () => {
   it('should update stickFigureEnabled state', () => {
     useTrackingStore.getState().setStickFigureEnabled(true)
     expect(useTrackingStore.getState().stickFigureEnabled).toBe(true)
-  })
-
-  it('should update isTracking state', () => {
-    useTrackingStore.getState().setTracking(true)
-
-    expect(useTrackingStore.getState().isTracking).toBe(true)
-  })
-
-  it('should update result', () => {
-    const mockResult = {
-      face: {
-        head: { pitch: 0.1, yaw: 0.2, roll: 0 },
-        eyes: { leftBlink: 0, rightBlink: 0 },
-        mouth: { open: 0, smile: 0 },
-      },
-      pose: null,
-      leftHand: null,
-      rightHand: null,
-    }
-
-    useTrackingStore.getState().setResult(mockResult)
-
-    expect(useTrackingStore.getState().result).toEqual(mockResult)
   })
 
   it('should update debugEnabled state', () => {
@@ -71,7 +43,7 @@ describe('useTrackingStore', () => {
       solved: {
         face: {
           head: { pitch: 0.1, yaw: 0.2, roll: 0 },
-          eyes: { leftBlink: 0.5, rightBlink: 0.5 },
+          eyes: { leftBlink: 0.5, rightBlink: 0.5, gazeX: 0, gazeY: 0 },
           mouth: { open: 0.3, smile: 0.2 },
         },
         pose: null,

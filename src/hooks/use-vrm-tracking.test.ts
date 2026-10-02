@@ -1,12 +1,9 @@
-/**
- * Tests for useVRMTracking hook
- */
-
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { useVRMTracking } from './use-vrm-tracking'
+import { useTrackingStore } from '../stores/tracking-store'
+import { solveHolistic } from '../lib/solver/holistic-solver'
 
-// Mock MediaPipe
 vi.mock('../lib/mediapipe/tracker', () => {
   class MockMediaPipeTracker {
     initialize = vi.fn().mockResolvedValue(undefined)
@@ -22,7 +19,6 @@ vi.mock('../lib/mediapipe/tracker', () => {
   return { MediaPipeTracker: MockMediaPipeTracker }
 })
 
-// Mock TrackingBridge
 vi.mock('../lib/vrm/tracking-bridge', () => {
   class MockTrackingBridge {
     update = vi.fn()
@@ -32,7 +28,6 @@ vi.mock('../lib/vrm/tracking-bridge', () => {
   return { TrackingBridge: MockTrackingBridge }
 })
 
-// Mock HolisticSolver
 vi.mock('../lib/solver/holistic-solver', () => ({
   solveHolistic: vi.fn().mockReturnValue({
     face: {
@@ -74,11 +69,14 @@ describe('useVRMTracking', () => {
     } as HTMLVideoElement,
   }
 
-  // Mock MediaStream
   const mockStream = {} as MediaStream
 
   beforeEach(() => {
     vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
   })
 
   it('should return expected interface when enabled and VRM is provided', () => {
@@ -91,7 +89,6 @@ describe('useVRMTracking', () => {
       })
     )
 
-    // Hook should return the expected interface
     expect(result.current).toHaveProperty('isTracking')
     expect(result.current).toHaveProperty('isInitializing')
     expect(result.current).toHaveProperty('error')
@@ -111,18 +108,14 @@ describe('useVRMTracking', () => {
       })
     )
 
-    // Allow effects to run
     await act(async () => {
       await new Promise(resolve => setTimeout(resolve, 50))
     })
 
-    // Should start initializing immediately since all prereqs are met
     await vi.waitFor(() => {
-      // Either initializing or already tracking
       expect(result.current.isInitializing || result.current.isTracking).toBe(true)
     }, { timeout: 500 })
 
-    // Should eventually be tracking
     await vi.waitFor(() => {
       expect(result.current.isTracking).toBe(true)
     }, { timeout: 1000 })
@@ -172,8 +165,6 @@ describe('useVRMTracking', () => {
   })
 
   it('should re-initialize tracking when stream changes', async () => {
-    // Simulates the scenario where the camera stream is updated
-    // (e.g., user switches camera or grants permission later)
     let currentStream: MediaStream | null = {} as MediaStream
 
     const { result, rerender } = renderHook(
@@ -187,23 +178,19 @@ describe('useVRMTracking', () => {
       { initialProps: { stream: currentStream } }
     )
 
-    // Should eventually be tracking
     await vi.waitFor(() => {
       expect(result.current.isTracking).toBe(true)
     }, { timeout: 500 })
 
-    // Simulate stream changing (e.g., new camera selected)
     const newStream = {} as MediaStream
     rerender({ stream: newStream })
 
-    // Should still be tracking after stream change
     await vi.waitFor(() => {
       expect(result.current.isTracking).toBe(true)
     }, { timeout: 500 })
   })
 
   it('should indicate waiting for video state when video is not ready', async () => {
-    // Video element exists but isn't ready (no source/data yet)
     const unreadyVideoRef = {
       current: {
         readyState: 0,
@@ -223,22 +210,18 @@ describe('useVRMTracking', () => {
       })
     )
 
-    // Allow effects to run
     await act(async () => {
       await new Promise(resolve => setTimeout(resolve, 50))
     })
 
-    // Should indicate waiting for video
     await vi.waitFor(() => {
       expect(result.current.isWaitingForVideo).toBe(true)
     }, { timeout: 500 })
 
-    // Should not be actively tracking yet
     expect(result.current.isTracking).toBe(false)
   })
 
   it('should transition from waiting to tracking when video becomes ready', async () => {
-    // Start with video not ready
     let readyState = 0
     let videoWidth = 0
     const listeners: Record<string, EventListener[]> = {
@@ -272,30 +255,196 @@ describe('useVRMTracking', () => {
       })
     )
 
-    // Allow effects to run
     await act(async () => {
       await new Promise(resolve => setTimeout(resolve, 50))
     })
 
-    // Should be waiting for video
     await vi.waitFor(() => {
       expect(result.current.isWaitingForVideo).toBe(true)
     }, { timeout: 500 })
 
-    // Simulate video becoming ready
     readyState = 4
     videoWidth = 640
 
-    // Trigger the loadeddata event
     await act(async () => {
       listeners.loadeddata?.forEach(listener => listener(new Event('loadeddata')))
       await new Promise(resolve => setTimeout(resolve, 50))
     })
 
-    // Should now be tracking
     await vi.waitFor(() => {
       expect(result.current.isTracking).toBe(true)
       expect(result.current.isWaitingForVideo).toBe(false)
     }, { timeout: 500 })
+  })
+
+  it('applies a new target FPS to the running loop', async () => {
+    const frames: FrameRequestCallback[] = []
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => frames.push(cb))
+    vi.stubGlobal('cancelAnimationFrame', () => {})
+
+    const { result, rerender } = renderHook(
+      ({ targetFps }) =>
+        useVRMTracking({
+          vrm: mockVRM as never,
+          videoRef: mockVideoRef,
+          stream: mockStream,
+          enabled: true,
+          targetFps,
+        }),
+      { initialProps: { targetFps: 30 } }
+    )
+    await vi.waitFor(() => {
+      expect(result.current.isTracking).toBe(true)
+    })
+
+    rerender({ targetFps: 10 })
+    vi.mocked(solveHolistic).mockClear()
+    for (let t = 0; t <= 1000; t += 1000 / 60) {
+      frames.splice(0).forEach((cb) => cb(t))
+    }
+
+    // 10 FPS over one second. The 30 FPS interval gives about 30.
+    expect(vi.mocked(solveHolistic).mock.calls.length).toBeLessThanOrEqual(11)
+  })
+
+  it('terminates a worker that becomes ready after unmount', async () => {
+    const workers: FakeWorker[] = []
+    class FakeWorker {
+      onmessage: ((e: { data: unknown }) => void) | null = null
+      onerror: (() => void) | null = null
+      postMessage = vi.fn()
+      terminate = vi.fn()
+      constructor() {
+        workers.push(this)
+      }
+    }
+    vi.stubGlobal('Worker', FakeWorker)
+
+    const { unmount } = renderHook(() =>
+      useVRMTracking({
+        vrm: mockVRM as never,
+        videoRef: mockVideoRef,
+        stream: mockStream,
+        enabled: true,
+      })
+    )
+    await vi.waitFor(() => {
+      expect(workers).toHaveLength(1)
+    })
+
+    unmount()
+    await act(async () => {
+      workers[0].onmessage!({ data: { type: 'ready', mode: 'gpu' } })
+    })
+
+    expect(workers[0].terminate).toHaveBeenCalled()
+  })
+
+  it('falls back to main-thread tracking when the worker fails after init', async () => {
+    const workers: FakeWorker[] = []
+    class FakeWorker {
+      onmessage: ((e: { data: unknown }) => void) | null = null
+      onerror: (() => void) | null = null
+      postMessage = vi.fn()
+      terminate = vi.fn()
+      constructor() {
+        workers.push(this)
+      }
+    }
+    const frames: FrameRequestCallback[] = []
+    vi.stubGlobal('Worker', FakeWorker)
+    vi.stubGlobal('createImageBitmap', () => Promise.resolve({ close: vi.fn() }))
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => frames.push(cb))
+    vi.stubGlobal('cancelAnimationFrame', () => {})
+    let now = 0
+    const runFrames = async (count: number) => {
+      for (let i = 0; i < count; i++) {
+        now += 100
+        frames.splice(0).forEach((cb) => cb(now))
+        await act(async () => {})
+      }
+    }
+
+    const { result } = renderHook(() =>
+      useVRMTracking({
+        vrm: mockVRM as never,
+        videoRef: mockVideoRef,
+        stream: mockStream,
+        enabled: true,
+      })
+    )
+    await vi.waitFor(() => {
+      expect(workers).toHaveLength(1)
+    })
+    await act(async () => {
+      workers[0].onmessage!({ data: { type: 'ready', mode: 'gpu' } })
+    })
+    await vi.waitFor(() => {
+      expect(result.current.isTracking).toBe(true)
+    })
+    await runFrames(1)
+    expect(workers[0].postMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({ type: 'frame' }),
+      expect.anything()
+    )
+
+    await act(async () => {
+      workers[0].onerror!()
+    })
+    vi.mocked(solveHolistic).mockClear()
+    await runFrames(3)
+
+    expect(solveHolistic).toHaveBeenCalled()
+  })
+
+  it('reports the worker result rate as the tracking fps', async () => {
+    const workers: FakeWorker[] = []
+    class FakeWorker {
+      onmessage: ((e: { data: unknown }) => void) | null = null
+      onerror: (() => void) | null = null
+      postMessage = vi.fn()
+      terminate = vi.fn()
+      constructor() {
+        workers.push(this)
+      }
+    }
+    vi.stubGlobal('Worker', FakeWorker)
+    vi.stubGlobal('createImageBitmap', () => Promise.resolve({ close: vi.fn() }))
+    vi.stubGlobal('requestAnimationFrame', () => 0)
+    vi.stubGlobal('cancelAnimationFrame', () => {})
+    useTrackingStore.getState().setDebugEnabled(true)
+    onTestFinished(() => {
+      useTrackingStore.getState().setDebugEnabled(false)
+    })
+
+    const { result } = renderHook(() =>
+      useVRMTracking({
+        vrm: mockVRM as never,
+        videoRef: mockVideoRef,
+        stream: mockStream,
+        enabled: true,
+      })
+    )
+    await vi.waitFor(() => {
+      expect(workers).toHaveLength(1)
+    })
+    await act(async () => {
+      workers[0].onmessage!({ data: { type: 'ready', mode: 'gpu' } })
+    })
+    await vi.waitFor(() => {
+      expect(result.current.isTracking).toBe(true)
+    })
+
+    let now = 1000
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now)
+    onTestFinished(() => {
+      clock.mockRestore()
+    })
+    const message = { data: { type: 'result', data: null, detection: null } }
+    act(() => workers[0].onmessage!(message))
+    now += 50
+    act(() => workers[0].onmessage!(message))
+
+    expect(useTrackingStore.getState().debugData?.performance.fps).toBeCloseTo(20)
   })
 })

@@ -14,12 +14,6 @@ describe('WorkerProtocol', () => {
       expect(msg.type).toBe('frame')
     })
 
-    it('should type set-debug message correctly', () => {
-      const on: WorkerInMessage = { type: 'set-debug', enabled: true }
-      const off: WorkerInMessage = { type: 'set-debug', enabled: false }
-      expect(on.type).toBe('set-debug')
-      expect(off.type).toBe('set-debug')
-    })
   })
 
   describe('WorkerOutMessage types', () => {

@@ -1,8 +1,8 @@
 /**
- * MediaPipeTracker - Wrapper around MediaPipe landmark detection.
- *
- * Uses FaceLandmarker (lighter, ~8-12ms) when only face tracking is needed,
- * and HolisticLandmarker (~15-25ms) when pose or hand tracking is required.
+ * Main-thread tracker that use-vrm-tracking.ts uses when the tracking worker
+ * fails to start. It loads FaceLandmarker when pose and hands are off, because
+ * HolisticLandmarker runs its pose and hand models even when only face
+ * landmarks are read (29d1a90).
  */
 
 import {
@@ -12,7 +12,7 @@ import {
 } from '@mediapipe/tasks-vision'
 import { WASM_BASE_PATH, HOLISTIC_MODEL_PATH, FACE_MODEL_PATH } from './constants'
 
-/** Unified result shape matching HolisticLandmarkerResult's landmark arrays. */
+/** Subset of HolisticLandmarkerResult. Face mode fills only faceLandmarks. */
 export interface TrackerResult {
   faceLandmarks: { x: number; y: number; z: number }[][]
   poseLandmarks: { x: number; y: number; z: number }[][]
@@ -22,23 +22,19 @@ export interface TrackerResult {
 }
 
 export interface MediaPipeTrackerOptions {
-  /** Number of faces to detect (default: 1) */
+  /** Face mode only. Default 1. */
   numFaces?: number
-  /** Number of hands to detect (default: 2) */
-  numHands?: number
-  /** Number of poses to detect (default: 1) */
-  numPoses?: number
-  /** Minimum confidence for face detection (0-1, default: 0.5) */
+  /** 0 to 1, default 0.5. Face mode also uses it as minFacePresenceConfidence. */
   minFaceDetectionConfidence?: number
-  /** Minimum confidence for pose detection (0-1, default: 0.5) */
+  /** 0 to 1, default 0.5. */
   minPoseDetectionConfidence?: number
-  /** Minimum confidence for hand detection (0-1, default: 0.5) */
+  /** 0 to 1, default 0.5. Passed to HolisticLandmarker as minHandLandmarksConfidence. */
   minHandDetectionConfidence?: number
-  /** CDN base URL for WASM files (default: jsDelivr) */
+  /** Default WASM_BASE_PATH. */
   wasmBasePath?: string
-  /** Whether pose tracking is needed (default: false) */
+  /** Selects HolisticLandmarker. Default false. */
   needsPose?: boolean
-  /** Whether hand tracking is needed (default: false) */
+  /** Selects HolisticLandmarker. Default false. */
   needsHands?: boolean
 }
 
@@ -49,7 +45,7 @@ export class MediaPipeTracker {
   private faceLandmarker: FaceLandmarker | null = null
   private options: MediaPipeTrackerOptions
 
-  /** Which model is active: 'face' (lightweight) or 'holistic' (full). */
+  /** Also 'holistic' before initialize(). */
   get mode(): 'face' | 'holistic' {
     return this.faceLandmarker ? 'face' : 'holistic'
   }
@@ -57,8 +53,6 @@ export class MediaPipeTracker {
   constructor(options: MediaPipeTrackerOptions = {}) {
     this.options = {
       numFaces: options.numFaces ?? 1,
-      numHands: options.numHands ?? 2,
-      numPoses: options.numPoses ?? 1,
       minFaceDetectionConfidence: options.minFaceDetectionConfidence ?? 0.5,
       minPoseDetectionConfidence: options.minPoseDetectionConfidence ?? 0.5,
       minHandDetectionConfidence: options.minHandDetectionConfidence ?? 0.5,
@@ -68,11 +62,7 @@ export class MediaPipeTracker {
     }
   }
 
-  /**
-   * Initialize the appropriate MediaPipe landmarker.
-   * Uses FaceLandmarker when only face tracking is needed (faster),
-   * HolisticLandmarker when pose or hand tracking is required.
-   */
+  /** Rejects when the WASM runtime or the model fails to load. */
   async initialize(): Promise<void> {
     const vision = await FilesetResolver.forVisionTasks(this.options.wasmBasePath!)
 
@@ -103,17 +93,11 @@ export class MediaPipeTracker {
     }
   }
 
-  /**
-   * Check if the tracker is ready to detect landmarks.
-   */
   isReady(): boolean {
     return this.holisticLandmarker !== null || this.faceLandmarker !== null
   }
 
-  /**
-   * Detect landmarks from a video frame.
-   * Returns a unified TrackerResult regardless of which model is active.
-   */
+  /** Returns null before initialize(), or when detection throws. It logs the error. */
   detectLandmarks(
     videoFrame: HTMLVideoElement | ImageData,
     timestamp: number
@@ -146,9 +130,6 @@ export class MediaPipeTracker {
     return null
   }
 
-  /**
-   * Clean up resources.
-   */
   async dispose(): Promise<void> {
     if (this.holisticLandmarker) {
       this.holisticLandmarker.close()

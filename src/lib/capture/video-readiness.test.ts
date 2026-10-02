@@ -1,7 +1,3 @@
-/**
- * Tests for video readiness utilities
- */
-
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { isVideoReady, waitForVideoReady } from './video-readiness'
 
@@ -65,7 +61,6 @@ describe('waitForVideoReady', () => {
   })
 
   it('should resolve immediately if video is already ready', async () => {
-    // Set up video as ready
     Object.defineProperty(video, 'readyState', { value: 4, configurable: true })
     Object.defineProperty(video, 'videoWidth', { value: 640, configurable: true })
 
@@ -73,13 +68,11 @@ describe('waitForVideoReady', () => {
   })
 
   it('should wait for loadeddata event when video is not ready', async () => {
-    // Video starts not ready
     Object.defineProperty(video, 'readyState', { value: 0, writable: true, configurable: true })
     Object.defineProperty(video, 'videoWidth', { value: 0, writable: true, configurable: true })
 
     const promise = waitForVideoReady(video)
 
-    // Simulate video becoming ready
     Object.defineProperty(video, 'readyState', { value: 4, configurable: true })
     Object.defineProperty(video, 'videoWidth', { value: 640, configurable: true })
     video.dispatchEvent(new Event('loadeddata'))
@@ -88,7 +81,6 @@ describe('waitForVideoReady', () => {
   })
 
   it('should reject with timeout error after specified timeout', async () => {
-    // Video never becomes ready
     Object.defineProperty(video, 'readyState', { value: 0, configurable: true })
     Object.defineProperty(video, 'videoWidth', { value: 0, configurable: true })
 
@@ -122,7 +114,7 @@ describe('waitForVideoReady', () => {
     try {
       await waitForVideoReady(video, { timeout: 50 })
     } catch {
-      // Expected to throw
+      // The timeout rejection is the point of this test.
     }
 
     expect(removeListenerSpy).toHaveBeenCalledWith('loadeddata', expect.any(Function))
