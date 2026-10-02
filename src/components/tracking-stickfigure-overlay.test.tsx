@@ -1,19 +1,13 @@
 /**
- * Smoke tests for the stick-figure debug overlay.
- *
- * We can't meaningfully render the Three.js scene in jsdom (no WebGL context),
- * so the renderer module and Three.js's WebGLRenderer are mocked away. These
- * tests check the React wiring: the overlay hides when disabled, mounts when
- * enabled, and the Close button flips the store flag.
+ * jsdom has no WebGL context, so these tests mock WebGLRenderer, OrbitControls, and
+ * the skeleton renderer. They check the React wiring and the GPU resource lifecycle.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, cleanup } from '@testing-library/react'
+import { StrictMode } from 'react'
 import { useTrackingStore } from '../stores/tracking-store'
 
-// Mock the Three.js OrbitControls addon — it touches DOM APIs (pointer events,
-// PointerLock) that don't survive jsdom cleanly. Constructable class form so
-// `new OrbitControls(...)` doesn't blow up.
 vi.mock('three/addons/controls/OrbitControls.js', () => {
   class MockOrbitControls {
     enableDamping = true
@@ -36,16 +30,23 @@ vi.mock('../lib/debug/skeleton-renderer', () => ({
   })),
 }))
 
+const rendererInstances = vi.hoisted(
+  () => [] as { domElement: HTMLCanvasElement; dispose: () => void; forceContextLoss: () => void }[],
+)
+
 vi.mock('three', async (importOriginal) => {
   const actual = await importOriginal<typeof import('three')>()
   class MockWebGLRenderer {
-    // One canvas per renderer — there are two renderers per overlay instance,
-    // so each call to `new WebGLRenderer()` must return a fresh canvas.
     domElement = document.createElement('canvas')
     setPixelRatio = vi.fn()
     setSize = vi.fn()
     render = vi.fn()
     dispose = vi.fn()
+    forceContextLoss = vi.fn()
+
+    constructor() {
+      rendererInstances.push(this)
+    }
   }
   return {
     ...actual,
@@ -97,5 +98,38 @@ describe('TrackingStickfigureOverlay', () => {
     useTrackingStore.getState().setStickFigureEnabled(true)
     render(<TrackingStickfigureOverlay vrm={null} />)
     expect(screen.getByText(/Drag to rotate · scroll to zoom · right-drag to pan/)).toBeInTheDocument()
+  })
+})
+
+describe('TrackingStickfigureOverlay GPU lifecycle', () => {
+  beforeEach(() => {
+    cleanup()
+    rendererInstances.length = 0
+    useTrackingStore.setState({ stickFigureEnabled: true, debugData: null })
+  })
+
+  it('renders with live renderers after a StrictMode remount', () => {
+    render(
+      <StrictMode>
+        <TrackingStickfigureOverlay vrm={null} />
+      </StrictMode>
+    )
+
+    const canvases = [...document.querySelectorAll('canvas')]
+    expect(canvases).toHaveLength(2)
+    for (const canvas of canvases) {
+      const owner = rendererInstances.find((r) => r.domElement === canvas)
+      expect(owner?.dispose).not.toHaveBeenCalled()
+    }
+  })
+
+  it('releases every WebGL context on close', () => {
+    const { unmount } = render(<TrackingStickfigureOverlay vrm={null} />)
+    unmount()
+
+    expect(rendererInstances.length).toBeGreaterThan(0)
+    for (const renderer of rendererInstances) {
+      expect(renderer.forceContextLoss).toHaveBeenCalled()
+    }
   })
 })

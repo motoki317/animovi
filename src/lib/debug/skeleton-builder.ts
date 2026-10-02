@@ -1,8 +1,3 @@
-/**
- * Builders that transform raw MediaPipe landmarks and a live VRM into the
- * canonical Skeleton shape consumed by the stick-figure debug overlay.
- */
-
 import type { VRM } from '@pixiv/three-vrm'
 import * as THREE from 'three'
 import type { RawLandmarks, RawLandmark } from '../worker/protocol'
@@ -16,10 +11,8 @@ import {
   type Vec3,
 } from './skeleton-model'
 
-// Drawing visibility threshold is intentionally loose — the raw stick figure
-// is for debugging tracking, so showing even noisy/partial detections is more
-// useful than hiding them. The bridge has its own stricter 0.5 threshold for
-// driving the VRM, which we explicitly don't reuse here.
+// Lower than the 0.5 that pose-solver.ts uses to drive the VRM, so that the
+// overlay also draws the noisy detections that the solver drops.
 const VISIBILITY_THRESHOLD = 0.1
 
 interface Frame {
@@ -27,15 +20,6 @@ interface Frame {
   scale: number
 }
 
-/**
- * Pick the origin (mid-shoulder) and scale (shoulder-width) used to normalize
- * a raw landmark set into the canonical shoulder-frame. Returns null when the
- * shoulders aren't both visible, in which case the skeleton can't be built.
- *
- * MediaPipe's image-space y grows downward, so we flip it on output. The x is
- * mirrored too (selfie view); we leave that alone here — the raw pane just
- * reflects what the model sees.
- */
 function shoulderFrameFromPose(pose: RawLandmark[]): Frame | null {
   const ls = pose[POSE_INDICES.leftShoulder]
   const rs = pose[POSE_INDICES.rightShoulder]
@@ -61,9 +45,9 @@ function shoulderFrameFromPose(pose: RawLandmark[]): Frame | null {
 
 function normalizeLandmark(p: RawLandmark, frame: Frame): Vec3 {
   return {
-    // Mirror un-flip so the figure faces the viewer like the avatar does.
+    // Same x flip as toSolverSpace() in pose-solver.ts.
     x: -((p.x - frame.origin.x) / frame.scale),
-    // Flip Y: MediaPipe Y grows downward.
+    // MediaPipe image y grows downward.
     y: -((p.y - frame.origin.y) / frame.scale),
     z: (p.z - frame.origin.z) / frame.scale,
   }
@@ -98,9 +82,8 @@ function addHandPoints(
   const wristPoint = out[side === 'left' ? 'leftWrist' : 'rightWrist']
   if (!wristPoint || !hand[HAND_INDICES.wrist]) return
 
-  // MediaPipe hand landmarks are in image space too, but their scale is wrist-relative
-  // and noisier. Anchor hand origin to the pose wrist; scale by the wrist→middleMCP
-  // distance so finger lengths are comparable across hand sizes.
+  // Anchor the hand at the pose wrist and draw every hand at the same palm
+  // size (wrist to middle MCP), whatever its size in the image.
   const handWrist = hand[HAND_INDICES.wrist]
   const middleMCP = hand[HAND_INDICES.middleMCP]
   if (!middleMCP) return
@@ -111,13 +94,13 @@ function addHandPoints(
   const palmSize = Math.sqrt(dx * dx + dy * dy + dz * dz)
   if (palmSize < 0.001) return
 
-  // Target palm size in canonical (shoulder-frame) units — keeps hands visible at sane scale.
+  // In shoulder widths.
   const targetPalmSize = 0.25
 
   for (const [partName, idx] of Object.entries(HAND_INDICES) as Array<[keyof typeof HAND_INDICES, number]>) {
     const lm = hand[idx]
     if (!lm) continue
-    if (partName === 'wrist') continue // already covered by pose
+    if (partName === 'wrist') continue // The pose supplies the wrist point.
 
     const localX = (lm.x - handWrist.x) / palmSize * targetPalmSize
     const localY = (lm.y - handWrist.y) / palmSize * targetPalmSize
@@ -135,10 +118,7 @@ function addHandPoints(
   }
 }
 
-/**
- * Build a Skeleton from raw MediaPipe landmarks (pose + optional hands).
- * Returns null if the pose isn't reliable enough to anchor a frame on.
- */
+/** Returns null when the pose has no usable pair of shoulders. */
 export function buildRawSkeleton(raw: RawLandmarks): Skeleton | null {
   if (!raw.pose || raw.pose.length === 0) return null
   const frame = shoulderFrameFromPose(raw.pose)
@@ -160,8 +140,8 @@ export function buildRawSkeleton(raw: RawLandmarks): Skeleton | null {
 const _tmpVec = new THREE.Vector3()
 
 function sampleBonePosition(vrm: VRM, boneName: string, frame: Frame): Vec3 | null {
-  // Cast through `never` to dodge VRM's strict humanoid-bone-name union type —
-  // we accept any string here so this builder stays generic.
+  // The names come from string tables, so `as never` bypasses the
+  // VRMHumanBoneName union. An unknown name returns null.
   const bone = vrm.humanoid.getNormalizedBoneNode(boneName as never)
   if (!bone) return null
   bone.getWorldPosition(_tmpVec)
@@ -172,12 +152,11 @@ function sampleBonePosition(vrm: VRM, boneName: string, frame: Frame): Vec3 | nu
   }
 }
 
-/** Origin / scale for the VRM side: extracted from the live skeleton itself. */
+// Uses the same bones as the leftShoulder and rightShoulder points, so the
+// drawn shoulder width is 1 as on the raw side.
 function shoulderFrameFromVRM(vrm: VRM): Frame | null {
-  const ls = vrm.humanoid.getNormalizedBoneNode('leftShoulder') ??
-             vrm.humanoid.getNormalizedBoneNode('leftUpperArm')
-  const rs = vrm.humanoid.getNormalizedBoneNode('rightShoulder') ??
-             vrm.humanoid.getNormalizedBoneNode('rightUpperArm')
+  const ls = vrm.humanoid.getNormalizedBoneNode('leftUpperArm')
+  const rs = vrm.humanoid.getNormalizedBoneNode('rightUpperArm')
   if (!ls || !rs) return null
 
   const lPos = ls.getWorldPosition(new THREE.Vector3())
@@ -192,8 +171,9 @@ function shoulderFrameFromVRM(vrm: VRM): Frame | null {
 }
 
 /**
- * VRM bone names corresponding to each skeleton joint. Some joints (e.g. left
- * shoulder for VRMs that don't expose a clavicle) fall back to the upper-arm.
+ * Pose landmarks 11 and 12 mark the shoulder joints, where the upper-arm bones
+ * start. The VRM `leftShoulder` and `rightShoulder` bones are the optional
+ * clavicles. The spine and head points anchor the AXIS_JOINTS triads.
  */
 const VRM_BONE_FOR_POINT: Record<string, string[]> = {
   leftShoulder: ['leftUpperArm'],
@@ -205,13 +185,15 @@ const VRM_BONE_FOR_POINT: Record<string, string[]> = {
   leftHip: ['leftUpperLeg'],
   rightHip: ['rightUpperLeg'],
   nose: ['head'],
+  spine: ['spine'],
+  head: ['head'],
 }
 
 const VRM_HAND_BONE_MAP: Record<string, string> = {
   ThumbCMC: 'ThumbMetacarpal',
   ThumbMCP: 'ThumbProximal',
   ThumbIP: 'ThumbDistal',
-  ThumbTip: 'ThumbDistal', // No tip bone — use distal as approximation
+  ThumbTip: 'ThumbDistal', // VRM has no fingertip bones.
   IndexMCP: 'IndexProximal',
   IndexPIP: 'IndexIntermediate',
   IndexDIP: 'IndexDistal',
@@ -231,16 +213,16 @@ const VRM_HAND_BONE_MAP: Record<string, string> = {
 }
 
 /**
- * Sample the live VRM's bone world positions and the rotations the bridge applied
- * to them, returning a Skeleton in the same canonical shoulder-frame as the raw
- * side so the two can be compared directly.
+ * Calls `vrm.scene.updateMatrixWorld(true)`. Returns null without a VRM or
+ * without both upper-arm bones.
  */
 export function buildAppliedSkeleton(
   vrm: VRM | null,
   applied: AppliedRotations,
 ): Skeleton | null {
   if (!vrm) return null
-  // Make sure the VRM's world matrices reflect the rotations applied this frame.
+  // Rotations that the bridge set this frame reach matrixWorld only at the
+  // next matrix update.
   vrm.scene.updateMatrixWorld(true)
 
   const frame = shoulderFrameFromVRM(vrm)
@@ -258,7 +240,7 @@ export function buildAppliedSkeleton(
     }
   }
 
-  // Sample hand bones — names match the VRM 1.x humanoid hand-bone convention.
+  // VRM 1.0 hand-bone names. three-vrm also exposes VRM 0.x models under them.
   for (const side of ['left', 'right'] as const) {
     const wristPoint = points[side === 'left' ? 'leftWrist' : 'rightWrist']
     if (!wristPoint) continue
@@ -272,7 +254,6 @@ export function buildAppliedSkeleton(
     }
   }
 
-  // Axis triads — one per bridge-tracked joint, using the applied rotation.
   const axes = AXIS_JOINTS.flatMap((joint) => {
     const boneNameForApplied = APPLIED_KEY_FOR_JOINT[joint] ?? joint
     const rot = applied[boneNameForApplied]
@@ -287,11 +268,7 @@ export function buildAppliedSkeleton(
   return { points, axes }
 }
 
-/**
- * Skeleton joint → AppliedRotations key. Shoulders/elbows in the bridge are
- * tracked under the VRM bone names (leftUpperArm, leftLowerArm, ...), not the
- * skeleton point names (leftShoulder, leftElbow).
- */
+/** The bridge keys AppliedRotations by VRM bone name, not by skeleton point name. */
 const APPLIED_KEY_FOR_JOINT: Record<string, string> = {
   leftShoulder: 'leftUpperArm',
   rightShoulder: 'rightUpperArm',

@@ -1,15 +1,5 @@
 'use client'
 
-/**
- * TrackingDebugOverlay - Transparent debug panel showing tracking pipeline data
- *
- * Shows real-time information about:
- * - Pipeline state (idle, initializing, tracking, error)
- * - MediaPipe detection results (face, pose, hands)
- * - Solved tracking values (head rotation, blinks, mouth)
- * - Performance metrics (FPS, frame time)
- */
-
 import { useState, useCallback, memo } from 'react'
 import { useTrackingStore } from '../stores/tracking-store'
 
@@ -140,7 +130,6 @@ export const TrackingDebugOverlay = memo(function TrackingDebugOverlay() {
         </div>
       ) : (
         <>
-          {/* Pipeline Status */}
           <div style={sectionStyle}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span style={{ color: stateColor }}>●</span>
@@ -161,7 +150,6 @@ export const TrackingDebugOverlay = memo(function TrackingDebugOverlay() {
             )}
           </div>
 
-          {/* Detection Status */}
           <div style={sectionStyle}>
             <div style={{ fontSize: '10px', color: '#888', marginBottom: '4px' }}>
               MediaPipe Detection
@@ -188,14 +176,12 @@ export const TrackingDebugOverlay = memo(function TrackingDebugOverlay() {
             </div>
           </div>
 
-          {/* Solved Values - Face */}
           {debugData?.solved?.face && (
             <div style={sectionStyle}>
               <div style={{ fontSize: '10px', color: '#888', marginBottom: '4px' }}>
                 Face
               </div>
 
-              {/* Head rotation */}
               <div style={{ marginBottom: '4px' }}>
                 <span style={{ color: '#888' }}>Head: </span>
                 <ValueDisplay label="P" value={debugData.solved.face.head?.pitch} />
@@ -203,14 +189,12 @@ export const TrackingDebugOverlay = memo(function TrackingDebugOverlay() {
                 <ValueDisplay label="R" value={debugData.solved.face.head?.roll} />
               </div>
 
-              {/* Eyes */}
               <div style={{ marginBottom: '4px' }}>
                 <span style={{ color: '#888' }}>Eyes: </span>
                 <ValueDisplay label="L" value={debugData.solved.face.eyes?.leftBlink} />
                 <ValueDisplay label="R" value={debugData.solved.face.eyes?.rightBlink} />
               </div>
 
-              {/* Mouth */}
               <div>
                 <span style={{ color: '#888' }}>Mouth: </span>
                 <ValueDisplay label="Open" value={debugData.solved.face.mouth?.open} />
@@ -219,14 +203,12 @@ export const TrackingDebugOverlay = memo(function TrackingDebugOverlay() {
             </div>
           )}
 
-          {/* Solved Values - Pose */}
           {debugData?.solved?.pose && (
             <div style={sectionStyle}>
               <div style={{ fontSize: '10px', color: '#888', marginBottom: '4px' }}>
                 Pose
               </div>
 
-              {/* Spine */}
               <div style={{ marginBottom: '4px' }}>
                 <span style={{ color: '#888' }}>Spine: </span>
                 <ValueDisplay label="P" value={debugData.solved.pose.spine?.pitch} />
@@ -234,7 +216,6 @@ export const TrackingDebugOverlay = memo(function TrackingDebugOverlay() {
                 <ValueDisplay label="R" value={debugData.solved.pose.spine?.roll} />
               </div>
 
-              {/* Left Arm */}
               <div style={{ marginBottom: '4px' }}>
                 <span style={{ color: '#888' }}>L.Arm: </span>
                 <ValueDisplay label="X" value={debugData.solved.pose.leftArm?.shoulder?.x} />
@@ -246,7 +227,6 @@ export const TrackingDebugOverlay = memo(function TrackingDebugOverlay() {
                 <ValueDisplay label="X" value={debugData.solved.pose.leftArm?.elbow?.x} />
               </div>
 
-              {/* Right Arm */}
               <div style={{ marginBottom: '4px' }}>
                 <span style={{ color: '#888' }}>R.Arm: </span>
                 <ValueDisplay label="X" value={debugData.solved.pose.rightArm?.shoulder?.x} />
@@ -260,7 +240,6 @@ export const TrackingDebugOverlay = memo(function TrackingDebugOverlay() {
             </div>
           )}
 
-          {/* Raw Pose Landmarks (for debugging IK) */}
           {debugData?.rawPose && (
             <div style={sectionStyle}>
               <div style={{ fontSize: '10px', color: '#888', marginBottom: '4px' }}>
@@ -281,7 +260,6 @@ export const TrackingDebugOverlay = memo(function TrackingDebugOverlay() {
             </div>
           )}
 
-          {/* Solved Values - Hands */}
           {(debugData?.solved?.leftHand || debugData?.solved?.rightHand) && (
             <div>
               <div style={{ fontSize: '10px', color: '#888', marginBottom: '4px' }}>

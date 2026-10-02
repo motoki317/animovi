@@ -1,22 +1,15 @@
 'use client'
 
 /**
- * TrackingStickfigureOverlay — side-by-side 3D stick figures comparing raw
- * MediaPipe output with the bone state actually applied to the VRM.
+ * Two 3D stick figures side by side: the raw MediaPipe landmarks, and the live
+ * VRM bone positions. A difference between them shows whether an error starts
+ * in tracking or later, in the solver, clamps, or smoothing.
  *
- * The two figures share a single WebGLRenderer (two scissor viewports) to
- * avoid the cost of a second GL context, but each pane has its own camera +
- * OrbitControls so the user can rotate them independently when something
- * suspicious shows up from one angle.
- *
- * Why two skeletons:
- *   raw      → derived from MediaPipe landmarks; shows what the tracker sees
- *   applied  → derived from live VRM bone positions; shows what the avatar does
- * A visible delta between the two pinpoints whether a discrepancy lives
- * upstream (tracking) or downstream (solver/clamp/smoothing).
+ * Each pane has its own WebGLRenderer, camera, and OrbitControls, so the user
+ * can rotate each pane on its own.
  */
 
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import type { VRM } from '@pixiv/three-vrm'
@@ -30,15 +23,14 @@ import { createSkeletonRenderer } from '../lib/debug/skeleton-renderer'
 const PANE_WIDTH = 200
 const PANE_HEIGHT = 200
 /**
- * Skeletons are normalized so shoulder-width = 1 and arms span ~3 units fully
- * extended. The pane camera frames roughly 2.5 vertical units at z=3 with the
- * 35° FOV, so we scale the rendered group down to make the figure fit comfortably
- * with headroom for raised arms.
+ * Skeleton units are shoulder widths, and outstretched arms span about 3 units.
+ * The pane camera (35° FOV, about 3 units away) shows about 1.9 units vertically.
+ * Half scale leaves headroom for raised arms.
  */
 const SKELETON_SCALE = 0.5
 
 export interface TrackingStickfigureOverlayProps {
-  /** The VRM whose applied bone state should be sampled for the right pane. */
+  /** The right pane reads the applied bone rotations from this VRM. */
   vrm: VRM | null
 }
 
@@ -59,17 +51,17 @@ interface InnerProps {
 function StickfigureOverlayInner({ vrm, onClose }: InnerProps) {
   const rawPaneRef = useRef<HTMLDivElement>(null)
   const appliedPaneRef = useRef<HTMLDivElement>(null)
-  // Keep the VRM accessible to the frame loop without re-creating the scene.
+  // The frame loop starts once, so it reads the current VRM through a ref.
   const vrmRef = useRef(vrm)
   vrmRef.current = vrm
-
-  // Memoize so the effect doesn't re-create the scene on every parent render.
-  const sceneSetup = useMemo(() => createSceneSetup(), [])
 
   useEffect(() => {
     const rawPane = rawPaneRef.current
     const appliedPane = appliedPaneRef.current
     if (!rawPane || !appliedPane) return
+    // Create the GPU resources here, not during render, so that each setup has
+    // its own cleanup. StrictMode runs setup, cleanup, and setup again on mount.
+    const sceneSetup = createSceneSetup()
     rawPane.appendChild(sceneSetup.rawCanvas)
     appliedPane.appendChild(sceneSetup.appliedCanvas)
 
@@ -86,17 +78,11 @@ function StickfigureOverlayInner({ vrm, onClose }: InnerProps) {
       if (rafId !== null) cancelAnimationFrame(rafId)
       sceneSetup.rawCanvas.remove()
       sceneSetup.appliedCanvas.remove()
-    }
-  }, [sceneSetup])
-
-  // Tear down all GPU resources when this component unmounts (overlay closed).
-  useEffect(() => {
-    return () => {
       sceneSetup.dispose()
     }
-  }, [sceneSetup])
+  }, [])
 
-  // Subscribe to debug data so the numeric readout re-renders on each frame.
+  // The frame loop reads the store directly. This subscription re-renders the table.
   const debugData = useTrackingStore((s) => s.debugData)
   const hasRawPose = !!(debugData?.rawLandmarks?.pose && debugData.rawLandmarks.pose.length > 0)
 
@@ -106,7 +92,7 @@ function StickfigureOverlayInner({ vrm, onClose }: InnerProps) {
         position: 'fixed',
         bottom: 10,
         left: 10,
-        zIndex: 9998, // sits below the text debug overlay (9999) so they don't fight
+        zIndex: 9998, // below the text debug overlay (9999)
         background: 'rgba(0, 0, 0, 0.85)',
         color: '#fff',
         fontFamily: 'ui-monospace, monospace',
@@ -278,17 +264,14 @@ function RotationDiffTable({
 }
 
 function highlightDelta(raw: number, applied: number): string {
-  // The boneSign correction in the bridge flips X and Z, so a "matching" applied
-  // value is either +raw or -raw. Compare against absolute distance and call out
-  // anything > 10°.
+  // The bridge flips the sign of X and Z for VRM 1.x, so a matching applied value
+  // is +raw or -raw. Grey: under 5°. Yellow: under 15°. Red: 15° or more.
   const diff = Math.min(Math.abs(applied - raw), Math.abs(applied + raw))
   const deg = diff * 180 / Math.PI
   if (deg < 5) return '#9ca3af'
   if (deg < 15) return '#facc15'
   return '#f87171'
 }
-
-// --- Three.js scene factory ---
 
 interface SceneSetup {
   rawCanvas: HTMLCanvasElement
@@ -310,11 +293,7 @@ interface Pane {
   skeleton: ReturnType<typeof createSkeletonRenderer>
 }
 
-/**
- * Build one pane (renderer + scene + camera + OrbitControls + skeleton).
- * Each pane gets its own canvas and OrbitControls so wheel/drag events only
- * affect the pane the cursor is over — no cross-pane event routing needed.
- */
+/** One canvas per pane, so wheel and drag events reach only the pane under the cursor. */
 function createPane(opts: {
   background: number
   skeletonColor: number
@@ -322,9 +301,8 @@ function createPane(opts: {
 }): Pane {
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false })
   renderer.setPixelRatio(window.devicePixelRatio)
-  // `true` (default) updates the canvas's CSS dimensions to match the requested
-  // size — without it, HiDPI displays blow the canvas up to backbuffer size and
-  // it overflows its container.
+  // updateStyle=true sets the CSS size. Without it, the canvas takes the size of its
+  // drawing buffer, which overflows the pane on HiDPI displays.
   renderer.setSize(PANE_WIDTH, PANE_HEIGHT, true)
 
   const scene = new THREE.Scene()
@@ -388,6 +366,10 @@ function createSceneSetup(): SceneSetup {
     appliedPane.skeleton.dispose()
     rawPane.renderer.dispose()
     appliedPane.renderer.dispose()
+    // dispose() keeps the WebGL context until garbage collection. At its context
+    // limit, Chrome drops the oldest context, which is usually the avatar's.
+    rawPane.renderer.forceContextLoss()
+    appliedPane.renderer.forceContextLoss()
   }
 
   return {
@@ -401,7 +383,7 @@ function createSceneSetup(): SceneSetup {
 
 function makeReferenceGrid(): THREE.Group {
   const group = new THREE.Group()
-  // Faint ground plane grid so depth is readable when the figure rotates.
+  // A ground grid makes depth visible while the figure rotates.
   const grid = new THREE.GridHelper(2, 4, 0x333344, 0x222233)
   grid.position.y = -1.2
   group.add(grid)

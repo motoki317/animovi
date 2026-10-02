@@ -1,29 +1,21 @@
 /**
- * Skeleton renderer — converts a canonical Skeleton into a Three.js Group of
- * line segments + joint markers + optional axis triads, ready to drop into the
- * stick-figure debug overlay scene.
- *
- * The renderer is stateful in one specific way: it keeps the same Group across
- * frames and mutates the line buffer in place, so updates at 30 fps don't
- * thrash the GPU with throwaway geometry.
+ * Keeps one Group and one line buffer for its whole life and updates them in
+ * place, so a tracking frame allocates no new geometry.
  */
 
 import * as THREE from 'three'
 import { AXIS_JOINTS, BONE_CONNECTIONS, type Skeleton } from './skeleton-model'
 
 export interface SkeletonRendererOptions {
-  /** Hex color for bone lines. */
+  /** Hex color for lines and joint dots. */
   color?: number
-  /** Whether to draw local-axis triads on joints in AXIS_JOINTS (applied side only). */
+  /** Draws an axis triad on each AXIS_JOINTS point. */
   showAxes?: boolean
-  /** Axis triad size in canonical (shoulder-frame) units. */
+  /** In shoulder widths. */
   axesSize?: number
 }
 
-/**
- * A skeleton drawing handle. Update() swaps in fresh points; the underlying
- * Group reference is stable so the caller can add it to a scene once.
- */
+/** `group` is the same object for the renderer's whole life, so add it to a scene once. */
 export interface SkeletonRenderer {
   group: THREE.Group
   update(skeleton: Skeleton | null): void
@@ -37,7 +29,6 @@ export function createSkeletonRenderer(options: SkeletonRendererOptions = {}): S
 
   const group = new THREE.Group()
 
-  // Bones: one big LineSegments with a position buffer sized for all connections.
   const lineGeometry = new THREE.BufferGeometry()
   const linePositions = new Float32Array(BONE_CONNECTIONS.length * 2 * 3)
   lineGeometry.setAttribute('position', new THREE.BufferAttribute(linePositions, 3))
@@ -45,8 +36,6 @@ export function createSkeletonRenderer(options: SkeletonRendererOptions = {}): S
   const lines = new THREE.LineSegments(lineGeometry, lineMaterial)
   group.add(lines)
 
-  // Joint dots — keep a fixed pool indexed by point name. Spheres are tiny so
-  // overdraw is not a concern; reusing them avoids per-frame allocations.
   const jointDots = new Map<string, THREE.Mesh>()
   const dotGeometry = new THREE.SphereGeometry(0.02, 6, 6)
   const dotMaterial = new THREE.MeshBasicMaterial({ color })
@@ -61,9 +50,6 @@ export function createSkeletonRenderer(options: SkeletonRendererOptions = {}): S
     return dot
   }
 
-  // Axis triads — one per joint listed in AXIS_JOINTS, parented to a Group so
-  // we can set its position to the joint and its local rotation to the applied
-  // rotation. Materials live inside the AxesHelper.
   const axisHelpers = new Map<string, { container: THREE.Group; helper: THREE.AxesHelper }>()
   if (showAxes) {
     for (const joint of AXIS_JOINTS) {
@@ -85,7 +71,6 @@ export function createSkeletonRenderer(options: SkeletonRendererOptions = {}): S
     }
     lines.visible = true
 
-    // Update line segment buffer
     let cursor = 0
     for (const [from, to] of BONE_CONNECTIONS) {
       const a = skeleton.points[from]
@@ -98,15 +83,14 @@ export function createSkeletonRenderer(options: SkeletonRendererOptions = {}): S
         linePositions[cursor++] = b.position.y
         linePositions[cursor++] = b.position.z
       } else {
-        // Hide invisible segments by collapsing them to the origin — slightly
-        // hacky but avoids a custom shader or per-segment hide logic.
+        // Collapse a hidden segment to the origin. This needs no per-segment
+        // visibility state.
         for (let i = 0; i < 6; i++) linePositions[cursor++] = 0
       }
     }
     lineGeometry.attributes.position.needsUpdate = true
     lineGeometry.computeBoundingSphere()
 
-    // Update dots
     const seen = new Set<string>()
     for (const [name, point] of Object.entries(skeleton.points)) {
       seen.add(name)
@@ -118,7 +102,6 @@ export function createSkeletonRenderer(options: SkeletonRendererOptions = {}): S
       if (!seen.has(name)) d.visible = false
     })
 
-    // Update axis triads
     if (showAxes) {
       const axesByJoint = new Map(skeleton.axes.map((a) => [a.point, a]))
       axisHelpers.forEach((entry, joint) => {

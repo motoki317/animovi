@@ -1,15 +1,9 @@
 /**
- * Canonical skeleton data model used by the stick-figure debug overlay.
- *
- * Both the raw MediaPipe pipeline (image-space landmarks) and the live VRM
- * (Three.js bone world positions) get normalized into this shape so the two
- * panes of the overlay can be compared apples-to-apples — every body is
- * centered on its own mid-shoulder and scaled so shoulder-width equals 1.
- *
- * Why a shared model: the raw and applied skeletons originate in different
- * coordinate systems (MediaPipe is mirrored-image-space, VRM is metric Y-up
- * world). Without normalization, the user cannot tell whether a visible
- * discrepancy is a real rotation difference or just a scale/origin offset.
+ * Shared shape for the two panes of the stick-figure debug overlay. The raw
+ * pane comes from MediaPipe image-space landmarks, and the applied pane from
+ * VRM bone world positions in meters. Both builders center each body on its
+ * mid-shoulder and scale it to a shoulder width of 1. Without this step, a
+ * scale or origin offset between the panes looks like a rotation error.
  */
 
 export interface Vec3 {
@@ -19,30 +13,25 @@ export interface Vec3 {
 }
 
 export interface SkeletonPoint {
-  /** Position in the canonical shoulder-frame (mid-shoulder origin, shoulder-width = 1). */
+  /** Mid-shoulder origin, in shoulder widths. */
   position: Vec3
-  /** True if the underlying source had this landmark visible / confidently detected. */
+  /** False when the MediaPipe visibility is below the threshold in skeleton-builder.ts. */
   visible: boolean
 }
 
 export interface SkeletonAxes {
-  /** The joint this axis triad is anchored to. */
+  /** Key into Skeleton.points. */
   point: string
-  /** Euler rotation in ZYX order, in the joint's local frame. */
+  /** Radians, ZYX order, in the bone's local frame. */
   rotation: Vec3
 }
 
 export interface Skeleton {
-  /** Joint positions keyed by canonical name (e.g. 'leftShoulder', 'rightWrist'). */
   points: Record<string, SkeletonPoint>
-  /** Per-joint local-axis triads — only present on the "applied" side. */
+  /** Empty on the raw side. */
   axes: SkeletonAxes[]
 }
 
-/**
- * Connections used by the stick-figure renderer. Both sides use the same list
- * so the two figures are visually comparable.
- */
 export const BONE_CONNECTIONS: ReadonlyArray<readonly [string, string]> = [
   // Torso
   ['leftShoulder', 'rightShoulder'],
@@ -56,11 +45,11 @@ export const BONE_CONNECTIONS: ReadonlyArray<readonly [string, string]> = [
   ['rightShoulder', 'rightElbow'],
   ['rightElbow', 'rightWrist'],
 
-  // Head (approximation — nose anchored to mid-shoulder via implicit chain)
+  // Head: there is no neck point, so the nose connects to both shoulders.
   ['leftShoulder', 'nose'],
   ['rightShoulder', 'nose'],
 
-  // Left hand — MediaPipe hand connection list (simplified to one chain per finger)
+  // Left hand: one chain per finger, from the wrist.
   ['leftWrist', 'leftThumbCMC'],
   ['leftThumbCMC', 'leftThumbMCP'],
   ['leftThumbMCP', 'leftThumbIP'],
@@ -82,7 +71,7 @@ export const BONE_CONNECTIONS: ReadonlyArray<readonly [string, string]> = [
   ['leftPinkyPIP', 'leftPinkyDIP'],
   ['leftPinkyDIP', 'leftPinkyTip'],
 
-  // Right hand — same chain pattern
+  // Right hand
   ['rightWrist', 'rightThumbCMC'],
   ['rightThumbCMC', 'rightThumbMCP'],
   ['rightThumbMCP', 'rightThumbIP'],
@@ -105,7 +94,7 @@ export const BONE_CONNECTIONS: ReadonlyArray<readonly [string, string]> = [
   ['rightPinkyDIP', 'rightPinkyTip'],
 ]
 
-/** Joints that get axis-triad gizmos on the applied side (matches VRM-bridged bones). */
+/** Points whose bones the bridge rotates. The applied pane draws an axis triad on each. */
 export const AXIS_JOINTS: readonly string[] = [
   'spine',
   'head',
@@ -115,7 +104,7 @@ export const AXIS_JOINTS: readonly string[] = [
   'rightElbow',
 ]
 
-/** MediaPipe Pose landmark indices for the body landmarks we care about. */
+/** MediaPipe Pose landmark indices. */
 export const POSE_INDICES = {
   nose: 0,
   leftShoulder: 11,

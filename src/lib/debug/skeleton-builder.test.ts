@@ -1,11 +1,73 @@
 import { describe, it, expect } from 'vitest'
-import { buildRawSkeleton } from './skeleton-builder'
+import * as THREE from 'three'
+import type { VRM } from '@pixiv/three-vrm'
+import { buildAppliedSkeleton, buildRawSkeleton } from './skeleton-builder'
 import { POSE_INDICES } from './skeleton-model'
 import type { RawLandmark } from '../worker/protocol'
 
 function emptyPose(): RawLandmark[] {
   return new Array(33).fill(null).map(() => ({ x: 0, y: 0, z: 0, visibility: 1 }))
 }
+
+function mockVRM(bonePositions: Record<string, [number, number, number]>): VRM {
+  const scene = new THREE.Group()
+  const bones: Record<string, THREE.Object3D> = {}
+  for (const [name, [x, y, z]] of Object.entries(bonePositions)) {
+    const bone = new THREE.Object3D()
+    bone.position.set(x, y, z)
+    scene.add(bone)
+    bones[name] = bone
+  }
+  return {
+    scene,
+    humanoid: { getNormalizedBoneNode: (name: string) => bones[name] ?? null },
+  } as unknown as VRM
+}
+
+const NO_ROTATION = { applied: { x: 0, y: 0, z: 0 }, raw: { x: 0, y: 0, z: 0 } }
+
+describe('buildAppliedSkeleton', () => {
+  it('scales by upper-arm width even when the VRM has clavicle bones', () => {
+    const vrm = mockVRM({
+      leftShoulder: [0.03, 1.4, 0],
+      rightShoulder: [-0.03, 1.4, 0],
+      leftUpperArm: [0.15, 1.4, 0],
+      rightUpperArm: [-0.15, 1.4, 0],
+    })
+
+    const skel = buildAppliedSkeleton(vrm, {})
+    expect(skel).not.toBeNull()
+
+    const l = skel!.points.leftShoulder.position
+    const r = skel!.points.rightShoulder.position
+    expect(Math.hypot(l.x - r.x, l.y - r.y, l.z - r.z)).toBeCloseTo(1, 5)
+  })
+
+  it('emits axis triads for every AXIS_JOINTS joint that the bridge rotated', () => {
+    const vrm = mockVRM({
+      leftUpperArm: [0.15, 1.4, 0],
+      rightUpperArm: [-0.15, 1.4, 0],
+      leftLowerArm: [0.4, 1.4, 0],
+      rightLowerArm: [-0.4, 1.4, 0],
+      spine: [0, 1.1, 0],
+      head: [0, 1.6, 0],
+    })
+
+    const skel = buildAppliedSkeleton(vrm, {
+      spine: NO_ROTATION,
+      head: NO_ROTATION,
+      leftUpperArm: NO_ROTATION,
+      rightUpperArm: NO_ROTATION,
+      leftLowerArm: NO_ROTATION,
+      rightLowerArm: NO_ROTATION,
+    })
+    expect(skel).not.toBeNull()
+
+    expect(skel!.axes.map((a) => a.point).sort()).toEqual(
+      ['head', 'leftElbow', 'leftShoulder', 'rightElbow', 'rightShoulder', 'spine'],
+    )
+  })
+})
 
 describe('buildRawSkeleton', () => {
   it('returns null when no pose is given', () => {
@@ -25,7 +87,7 @@ describe('buildRawSkeleton', () => {
 
   it('normalizes a T-pose body so shoulders sit at ±0.5 on x', () => {
     const pose = emptyPose()
-    // Mid-shoulder at (0.5, 0.4), shoulder width = 0.2 in image space
+    // Mid-shoulder at (0.5, 0.4), shoulder width 0.2 in image space.
     pose[POSE_INDICES.leftShoulder] = { x: 0.4, y: 0.4, z: 0, visibility: 1 }
     pose[POSE_INDICES.rightShoulder] = { x: 0.6, y: 0.4, z: 0, visibility: 1 }
     pose[POSE_INDICES.leftWrist] = { x: 0.2, y: 0.4, z: 0, visibility: 1 }
@@ -35,14 +97,13 @@ describe('buildRawSkeleton', () => {
     expect(skel).not.toBeNull()
     if (!skel) return
 
-    // After normalization, shoulders should be ±0.5 on x.
-    // x is mirror-flipped: leftShoulder.x = -(-0.5) = 0.5 (right side of mirror image)
+    // normalizeLandmark negates x, so the left shoulder lands at +0.5.
     expect(skel.points.leftShoulder.position.x).toBeCloseTo(0.5, 3)
     expect(skel.points.rightShoulder.position.x).toBeCloseTo(-0.5, 3)
     expect(skel.points.leftShoulder.position.y).toBeCloseTo(0, 3)
     expect(skel.points.rightShoulder.position.y).toBeCloseTo(0, 3)
 
-    // Wrists at the same horizontal level (T-pose), 1.0 shoulder-widths out from each shoulder.
+    // T-pose: each wrist is one shoulder width beyond its shoulder.
     expect(skel.points.leftWrist.position.x).toBeCloseTo(1.5, 3)
     expect(skel.points.rightWrist.position.x).toBeCloseTo(-1.5, 3)
   })
@@ -51,14 +112,13 @@ describe('buildRawSkeleton', () => {
     const pose = emptyPose()
     pose[POSE_INDICES.leftShoulder] = { x: 0.4, y: 0.5, z: 0, visibility: 1 }
     pose[POSE_INDICES.rightShoulder] = { x: 0.6, y: 0.5, z: 0, visibility: 1 }
-    // Wrist raised: in MediaPipe Y-down coords, raised = lower y value
+    // MediaPipe y grows downward, so a raised wrist has a smaller y.
     pose[POSE_INDICES.leftWrist] = { x: 0.4, y: 0.1, z: 0, visibility: 1 }
 
     const skel = buildRawSkeleton({ pose })
     expect(skel).not.toBeNull()
     if (!skel) return
 
-    // After Y-flip, the wrist should be ABOVE the shoulder in canonical coords (higher y).
     expect(skel.points.leftWrist.position.y).toBeGreaterThan(skel.points.leftShoulder.position.y)
   })
 
@@ -90,7 +150,6 @@ describe('buildRawSkeleton', () => {
     const skel = buildRawSkeleton({ pose, leftHand })
     expect(skel).not.toBeNull()
     if (!skel) return
-    // Index tip should now exist
     expect(skel.points.leftIndexTip).toBeDefined()
     expect(skel.points.leftThumbTip).toBeDefined()
   })
