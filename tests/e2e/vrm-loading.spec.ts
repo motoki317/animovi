@@ -1,120 +1,94 @@
-import { test, expect } from '@playwright/test'
-import * as path from 'path'
-import * as fs from 'fs'
+import { test, expect, type Page } from '@playwright/test'
 
-/**
- * VRM Loading E2E Tests
- *
- * MANUAL SETUP REQUIRED:
- * Place a valid VRM file at `.local/test.vrm` in the project root.
- * This file is not committed to the repository.
- *
- * Example VRM files can be downloaded from:
- * - https://hub.vroid.com/
- * - https://vrm.dev/
- */
+// VRM 1.0 requires these humanoid bones. Each entry is [bone, parent, offset].
+const BONES: Array<[string, string | null, [number, number, number]]> = [
+  ['hips', null, [0, 1, 0]],
+  ['spine', 'hips', [0, 0.1, 0]],
+  ['head', 'spine', [0, 0.5, 0]],
+  ['leftUpperArm', 'spine', [0.2, 0.35, 0]],
+  ['leftLowerArm', 'leftUpperArm', [0.25, 0, 0]],
+  ['leftHand', 'leftLowerArm', [0.25, 0, 0]],
+  ['rightUpperArm', 'spine', [-0.2, 0.35, 0]],
+  ['rightLowerArm', 'rightUpperArm', [-0.25, 0, 0]],
+  ['rightHand', 'rightLowerArm', [-0.25, 0, 0]],
+  ['leftUpperLeg', 'hips', [0.1, -0.05, 0]],
+  ['leftLowerLeg', 'leftUpperLeg', [0, -0.45, 0]],
+  ['leftFoot', 'leftLowerLeg', [0, -0.45, 0]],
+  ['rightUpperLeg', 'hips', [-0.1, -0.05, 0]],
+  ['rightLowerLeg', 'rightUpperLeg', [0, -0.45, 0]],
+  ['rightFoot', 'rightLowerLeg', [0, -0.45, 0]],
+]
 
-const TEST_VRM_PATH = '.local/test.vrm'
+// A mesh-free VRM 1.0 GLB, so that the spec needs no binary fixture.
+function minimalVrm(): Buffer {
+  const index = new Map(BONES.map(([name], i) => [name, i]))
+  const nodes = BONES.map(([name, , translation]) => ({
+    name,
+    translation,
+    children: BONES.filter(([, parent]) => parent === name).map(([child]) => index.get(child)!),
+  }))
+  const json = {
+    asset: { version: '2.0' },
+    scene: 0,
+    scenes: [{ nodes: [0] }],
+    nodes,
+    extensionsUsed: ['VRMC_vrm'],
+    extensions: {
+      VRMC_vrm: {
+        specVersion: '1.0',
+        meta: {
+          name: 'e2e',
+          authors: ['animovi'],
+          // three-vrm rejects any other license URL by default.
+          licenseUrl: 'https://vrm.dev/licenses/1.0/',
+        },
+        humanoid: {
+          humanBones: Object.fromEntries(BONES.map(([name], i) => [name, { node: i }])),
+        },
+      },
+    },
+  }
+
+  // GLB chunks are 4-byte aligned. JSON chunks pad with spaces.
+  let chunk = Buffer.from(JSON.stringify(json))
+  chunk = Buffer.concat([chunk, Buffer.alloc((4 - (chunk.length % 4)) % 4, ' ')])
+  const header = Buffer.alloc(20)
+  header.writeUInt32LE(0x46546c67, 0) // "glTF"
+  header.writeUInt32LE(2, 4)
+  header.writeUInt32LE(20 + chunk.length, 8)
+  header.writeUInt32LE(chunk.length, 12)
+  header.writeUInt32LE(0x4e4f534a, 16) // "JSON"
+  return Buffer.concat([header, chunk])
+}
+
+// Next.js adds an empty role="alert" route announcer outside <main>.
+const appAlert = (page: Page) => page.getByRole('main').getByRole('alert')
 
 test.describe('VRM Loading E2E', () => {
-  // Skip all tests if test VRM file doesn't exist
-  test.beforeEach(async ({}, testInfo) => {
-    const vrmExists = fs.existsSync(path.resolve(TEST_VRM_PATH))
-    if (!vrmExists) {
-      testInfo.skip(true, `Test VRM file not found at ${TEST_VRM_PATH}. See test file for setup instructions.`)
-    }
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/')
+    await expect(page.getByTestId('avatar-scene')).toBeVisible()
   })
 
-  test('should load VRM file via file input', async ({ page }) => {
-    await page.goto('/')
+  test('loads a VRM file and adds it to the gallery', async ({ page }) => {
+    await page.getByTestId('vrm-file-input').setInputFiles({
+      name: 'minimal.vrm',
+      mimeType: 'application/octet-stream',
+      buffer: minimalVrm(),
+    })
 
-    // Wait for app to be ready
-    await expect(page.locator('[data-testid="avatar-scene"]')).toBeVisible()
-
-    // Get the file input (we'll need to add one to the UI)
-    const fileInput = page.locator('input[type="file"][accept=".vrm"]')
-
-    // Skip if file input doesn't exist yet (component not implemented)
-    const inputExists = await fileInput.count()
-    if (inputExists === 0) {
-      test.skip(true, 'VRM file input not yet implemented in UI')
-      return
-    }
-
-    // Upload the VRM file
-    const vrmPath = path.resolve(TEST_VRM_PATH)
-    await fileInput.setInputFiles(vrmPath)
-
-    // Wait for loading indicator to disappear (if exists)
-    const loadingIndicator = page.locator('[data-testid="loading-indicator"]')
-    if (await loadingIndicator.count() > 0) {
-      await expect(loadingIndicator).toBeHidden({ timeout: 30000 })
-    }
-
-    // The avatar scene should still be visible after load
-    await expect(page.locator('[data-testid="avatar-scene"]')).toBeVisible()
+    await expect(page.getByTestId('vrm-gallery')).toBeVisible()
+    await expect(page.getByTestId(/^vrm-gallery-item-/)).toHaveCount(1)
+    await expect(appAlert(page)).toHaveCount(0)
   })
 
-  test('should display loading progress when loading VRM', async ({ page }) => {
-    await page.goto('/')
-
-    // Wait for app to be ready
-    await expect(page.locator('[data-testid="avatar-scene"]')).toBeVisible()
-
-    const fileInput = page.locator('input[type="file"][accept=".vrm"]')
-    const inputExists = await fileInput.count()
-    if (inputExists === 0) {
-      test.skip(true, 'VRM file input not yet implemented in UI')
-      return
-    }
-
-    // Upload the VRM file
-    const vrmPath = path.resolve(TEST_VRM_PATH)
-    await fileInput.setInputFiles(vrmPath)
-
-    // Should show some loading feedback (progress bar or text)
-    // This may be quick for small files, so we use a lenient check
-    const hasProgress =
-      await page.locator('[data-testid="loading-progress"]').count() > 0 ||
-      await page.locator('text=/loading|Loading/i').count() > 0
-
-    // Note: Large VRM files should show progress, but test.vrm might be small enough
-    // to load instantly. This test documents the expected behavior.
-    expect(true).toBe(true) // Placeholder - actual progress check depends on file size
-  })
-
-  test('should handle invalid file gracefully', async ({ page }) => {
-    await page.goto('/')
-
-    // Wait for app to be ready
-    await expect(page.locator('[data-testid="avatar-scene"]')).toBeVisible()
-
-    const fileInput = page.locator('input[type="file"][accept=".vrm"]')
-    const inputExists = await fileInput.count()
-    if (inputExists === 0) {
-      test.skip(true, 'VRM file input not yet implemented in UI')
-      return
-    }
-
-    // Create a fake invalid file
-    const invalidFile = {
+  test('shows an error for an invalid file', async ({ page }) => {
+    await page.getByTestId('vrm-file-input').setInputFiles({
       name: 'invalid.vrm',
       mimeType: 'application/octet-stream',
       buffer: Buffer.from('not a valid vrm file'),
-    }
+    })
 
-    // Note: setInputFiles with buffer requires Playwright 1.40+
-    // For older versions, we'd need to create a temp file
-    try {
-      await fileInput.setInputFiles(invalidFile)
-
-      // Should show error message
-      await expect(
-        page.locator('text=/error|invalid|failed/i')
-      ).toBeVisible({ timeout: 5000 })
-    } catch {
-      // If setInputFiles with buffer isn't supported, skip
-      test.skip(true, 'Buffer upload not supported in this Playwright version')
-    }
+    await expect(appAlert(page)).toContainText('VRM load error')
   })
 })
