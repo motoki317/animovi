@@ -50,7 +50,7 @@ describe('PoseSolver', () => {
     expect(result!.spine.roll).toBeCloseTo(0, 1)
   })
 
-  it('should detect positive spine yaw when body turns right', () => {
+  it('returns negative spine yaw when the subject turns right', () => {
     const landmarks = createNeutralPoseLandmarks()
     // MediaPipe z grows away from the camera, so the right shoulder moved back.
     landmarks[11] = { x: 0.4, y: 0.3, z: -0.05, visibility: 1.0 }
@@ -59,7 +59,15 @@ describe('PoseSolver', () => {
     const result = solvePose(landmarks)
 
     expect(result).not.toBeNull()
-    expect(result!.spine.yaw).toBeGreaterThan(0.1)
+    expect(result!.spine.yaw).toBeLessThan(-0.1)
+  })
+
+  it('returns negative spine roll when the subject leans right', () => {
+    const landmarks = createNeutralPoseLandmarks()
+    landmarks[11].y = 0.3
+    landmarks[12].y = 0.4
+
+    expect(solvePose(landmarks)!.spine.roll).toBeCloseTo(-0.2)
   })
 
   it('uses world landmarks for a near-zero spine yaw when facing forward', () => {
@@ -79,8 +87,8 @@ describe('PoseSolver', () => {
     const result = solvePose(normalized, world)
 
     const rawAngle = Math.atan2(0.1 - -0.1, -(-0.16 - 0.16)) // atan2(Δz, -Δx)
-    expect(result!.spine.yaw).toBeGreaterThan(0)
-    expect(result!.spine.yaw).toBeCloseTo(rawAngle * SPINE_YAW_GAIN, 5)
+    expect(result!.spine.yaw).toBeLessThan(0)
+    expect(result!.spine.yaw).toBeCloseTo(-rawAngle * SPINE_YAW_GAIN, 5)
   })
 
   it('keeps spine yaw small for a head-turn-sized shoulder perturbation', () => {
@@ -102,7 +110,7 @@ describe('PoseSolver', () => {
 
     const result = solvePose(normalized, world)
 
-    expect(result!.spine.yaw).toBeCloseTo(SPINE_YAW_CLAMP, 5)
+    expect(result!.spine.yaw).toBeCloseTo(-SPINE_YAW_CLAMP, 5)
   })
 
   it('falls back to the legacy normalized estimate when world landmarks are absent', () => {
@@ -113,8 +121,8 @@ describe('PoseSolver', () => {
     const withoutWorld = solvePose(normalized)
     const withEmptyWorld = solvePose(normalized, [])
 
-    expect(withoutWorld!.spine.yaw).toBeCloseTo((0.05 - -0.05) * 3, 5)
-    expect(withEmptyWorld!.spine.yaw).toBeCloseTo((0.05 - -0.05) * 3, 5)
+    expect(withoutWorld!.spine.yaw).toBeCloseTo((-0.05 - 0.05) * 3, 5)
+    expect(withEmptyWorld!.spine.yaw).toBeCloseTo((-0.05 - 0.05) * 3, 5)
   })
 
   it('should return null when key landmarks have low visibility', () => {

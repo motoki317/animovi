@@ -34,7 +34,7 @@ describe('FaceSolver', () => {
     expect(result!.head.roll).toBeCloseTo(0, 1)
   })
 
-  it('should detect positive yaw when face turns right', () => {
+  it('returns negative bone yaw when the subject turns right', () => {
     const landmarks = createNeutralFaceLandmarks()
     // Nose left of the image center: the subject turns to their right.
     landmarks[1] = { x: 0.3, y: 0.5, z: 0.02 }
@@ -42,7 +42,7 @@ describe('FaceSolver', () => {
     const result = solveFace(landmarks)
 
     expect(result).not.toBeNull()
-    expect(result!.head.yaw).toBeGreaterThan(0.1)
+    expect(result!.head.yaw).toBeLessThan(-0.1)
   })
 
   it('detects positive pitch when the head tilts back (forehead farther than chin)', () => {
@@ -68,16 +68,25 @@ describe('FaceSolver', () => {
     expect(result!.head.pitch).toBeLessThan(-0.1)
   })
 
-  it('should detect left eye blink when eye is closed', () => {
+  it.each(['left', 'right'] as const)("maps the subject's %s eye closure to its blink field", (side) => {
     const landmarks = createNeutralFaceLandmarks()
-    // The upper lid (159) meets the lower lid (145) of the image-left eye.
-    landmarks[159] = { x: 0.35, y: 0.38, z: 0 }
-    landmarks[145] = { x: 0.35, y: 0.38, z: 0 }
+    landmarks[386].y = 0.4
+    landmarks[374].y = side === 'left' ? 0.4 : 0.44
+    landmarks[159].y = 0.4
+    landmarks[145].y = side === 'right' ? 0.4 : 0.44
 
-    const result = solveFace(landmarks)
+    const result = solveFace(landmarks)!
 
-    expect(result).not.toBeNull()
-    expect(result!.eyes.leftBlink).toBeGreaterThan(0.5)
+    expect(result.eyes.leftBlink).toBe(side === 'left' ? 1 : 0)
+    expect(result.eyes.rightBlink).toBe(side === 'right' ? 1 : 0)
+  })
+
+  it('keeps negative bone roll when the subject tilts their head right', () => {
+    const landmarks = createNeutralFaceLandmarks()
+    landmarks[33].y = 0.45
+    landmarks[263].y = 0.4
+
+    expect(solveFace(landmarks)!.head.roll).toBeCloseTo(-0.2)
   })
 
   it('should detect mouth open when lips are apart', () => {
@@ -107,32 +116,32 @@ describe('FaceSolver', () => {
 describe('Eye Gaze', () => {
   // The eye corners and lids bound each socket. The iris centers (468, 473) move inside it.
   function createGazeLandmarks(
-    leftIrisX: number,
-    leftIrisY: number,
-    rightIrisX: number,
-    rightIrisY: number
+    imageLeftIrisX: number,
+    imageLeftIrisY: number,
+    imageRightIrisX: number,
+    imageRightIrisY: number
   ): FaceLandmarks {
     const landmarks = createNeutralFaceLandmarks()
 
-    // Left eye corners (define the socket bounds)
+    // Image-left eye corners (define the socket bounds)
     landmarks[33] = { x: 0.32, y: 0.42, z: 0 }  // outer corner
     landmarks[133] = { x: 0.42, y: 0.42, z: 0 }  // inner corner
 
-    // Left eye upper/lower (for blink)
+    // Image-left eye upper/lower (for blink)
     landmarks[159] = { x: 0.37, y: 0.40, z: 0 } // upper
     landmarks[145] = { x: 0.37, y: 0.44, z: 0 } // lower
 
-    // Right eye corners
+    // Image-right eye corners
     landmarks[263] = { x: 0.68, y: 0.42, z: 0 } // outer corner
     landmarks[362] = { x: 0.58, y: 0.42, z: 0 } // inner corner
 
-    // Right eye upper/lower
+    // Image-right eye upper/lower
     landmarks[386] = { x: 0.63, y: 0.40, z: 0 } // upper
     landmarks[374] = { x: 0.63, y: 0.44, z: 0 } // lower
 
     // Iris centers
-    landmarks[468] = { x: leftIrisX, y: leftIrisY, z: 0 }
-    landmarks[473] = { x: rightIrisX, y: rightIrisY, z: 0 }
+    landmarks[468] = { x: imageLeftIrisX, y: imageLeftIrisY, z: 0 }
+    landmarks[473] = { x: imageRightIrisX, y: imageRightIrisY, z: 0 }
 
     return landmarks
   }
@@ -145,14 +154,14 @@ describe('Eye Gaze', () => {
     expect(Math.abs(result.eyes.gazeY)).toBeLessThan(0.15)
   })
 
-  it('should detect positive gazeX when looking right (iris shifted right in image)', () => {
+  it('should detect positive gazeX when the subject looks left (iris shifted right in image)', () => {
     const landmarks = createGazeLandmarks(0.40, 0.42, 0.66, 0.42)
     const result = solveFace(landmarks)!
 
     expect(result.eyes.gazeX).toBeGreaterThan(0.2)
   })
 
-  it('should detect negative gazeX when looking left', () => {
+  it('should detect negative gazeX when the subject looks right', () => {
     const landmarks = createGazeLandmarks(0.34, 0.42, 0.60, 0.42)
     const result = solveFace(landmarks)!
 

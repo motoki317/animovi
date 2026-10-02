@@ -1,19 +1,19 @@
 /**
- * End-to-end arm check against a real three-vrm humanoid. Each fixture runs
+ * End-to-end motion checks against a real three-vrm humanoid. Each fixture runs
  * through solveHolistic, TrackingBridge, and a VRMHumanoid built from a
  * procedural T-pose skeleton. The test then reads the world positions of the
- * raw arm bones, which is what the renderer draws.
+ * raw bones, which is what the renderer draws.
  *
  * Drift is the angle, in world space, between the shoulder→wrist direction
  * from the landmarks and the shoulder→hand direction of the raw bones.
  */
 
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import * as THREE from 'three'
-import { VRMHumanoid, VRMUtils } from '@pixiv/three-vrm'
+import { VRMExpression, VRMExpressionManager, VRMHumanoid, VRMUtils } from '@pixiv/three-vrm'
 import type { VRM, VRMHumanBones } from '@pixiv/three-vrm'
 import { TrackingBridge } from './tracking-bridge'
-import { solveHolistic } from '../solver/holistic-solver'
+import { solveHolistic, type HolisticLandmarks } from '../solver/holistic-solver'
 import { toSolverSpace } from '../solver/pose-solver'
 import { dot, length, normalize, sub, type Vector3 } from '../math/vector'
 import {
@@ -49,6 +49,10 @@ interface BuiltVrm {
   vrm: VRM
   scene: THREE.Scene
   raw: {
+    spine: THREE.Object3D
+    head: THREE.Object3D
+    leftEye: THREE.Object3D
+    rightEye: THREE.Object3D
     leftUpperArm: THREE.Object3D
     leftHand: THREE.Object3D
     rightUpperArm: THREE.Object3D
@@ -75,10 +79,11 @@ function buildProceduralVRM(metaVersion: '0' | '1'): BuiltVrm {
     return o
   }
 
-  // Each position is relative to the parent bone.
   const hips = make('hips', [0, 1.0, 0])
   const spine = make('spine', [0, 0.2, 0])
   const head = make('head', [0, 0.5, 0])
+  const leftEye = make('leftEye', [leftSign * 0.04, 0.06, leftSign * 0.08])
+  const rightEye = make('rightEye', [rightSign * 0.04, 0.06, leftSign * 0.08])
 
   const leftShoulderJoint = make('leftShoulderJoint', [leftSign * 0.18, 0.15, 0])
   const leftUpperArm = make('leftUpperArm', [leftSign * 0.05, 0, 0])
@@ -101,6 +106,7 @@ function buildProceduralVRM(metaVersion: '0' | '1'): BuiltVrm {
   scene.add(hips)
   hips.add(spine)
   spine.add(head)
+  head.add(leftEye, rightEye)
   spine.add(leftShoulderJoint)
   leftShoulderJoint.add(leftUpperArm)
   leftUpperArm.add(leftLowerArm)
@@ -123,6 +129,8 @@ function buildProceduralVRM(metaVersion: '0' | '1'): BuiltVrm {
     hips: { node: hips },
     spine: { node: spine },
     head: { node: head },
+    leftEye: { node: leftEye },
+    rightEye: { node: rightEye },
     leftUpperArm: { node: leftUpperArm },
     leftLowerArm: { node: leftLowerArm },
     leftHand: { node: leftHand },
@@ -141,20 +149,20 @@ function buildProceduralVRM(metaVersion: '0' | '1'): BuiltVrm {
   scene.add(humanoid.normalizedHumanBonesRoot)
 
   // The minimal VRM shape that TrackingBridge and rotateVRM0 read.
+  const expressionManager = new VRMExpressionManager()
+  expressionManager.registerExpression(new VRMExpression('blinkLeft'))
+  expressionManager.registerExpression(new VRMExpression('blinkRight'))
   const vrm = {
     meta: { metaVersion },
     humanoid,
     scene,
-    expressionManager: {
-      setValue: vi.fn(),
-      getValue: vi.fn(),
-    },
+    expressionManager,
   } as unknown as VRM
 
   VRMUtils.rotateVRM0(vrm)
   scene.updateMatrixWorld(true)
 
-  return { vrm, scene, raw: { leftUpperArm, leftHand, rightUpperArm, rightHand } }
+  return { vrm, scene, raw: { spine, head, leftEye, rightEye, leftUpperArm, leftHand, rightUpperArm, rightHand } }
 }
 
 function vec(o: THREE.Vector3 | { x: number; y: number; z: number }): Vector3 {
@@ -285,4 +293,105 @@ describe('Real-VRM cross-version: VRM 0.x vs 1.x should produce identical world 
       }
     })
   }
+})
+
+function neutralLandmarks(): HolisticLandmarks {
+  const face = Array.from({ length: 478 }, () => ({ x: 0.5, y: 0.5, z: 0 }))
+  for (const [outer, inner, upper, lower, iris, x] of [
+    [33, 133, 159, 145, 468, 0.37],
+    [263, 362, 386, 374, 473, 0.63],
+  ]) {
+    face[outer] = { x: x < 0.5 ? x - 0.05 : x + 0.05, y: 0.42, z: 0 }
+    face[inner] = { x: x < 0.5 ? x + 0.05 : x - 0.05, y: 0.42, z: 0 }
+    face[upper] = { x, y: 0.4, z: 0 }
+    face[lower] = { x, y: 0.44, z: 0 }
+    face[iris] = { x, y: 0.42, z: 0 }
+  }
+  return { face, pose: [], leftHand: [], rightHand: [] }
+}
+
+type DirectionReadout = 'headForwardX' | 'spineForwardX' | 'spineUpX' | 'headUpX' | 'eyesForwardX' | 'headForwardY' | 'eyesForwardY'
+const SAME_SIDE_MOTIONS: Array<{
+  name: string
+  move: (landmarks: HolisticLandmarks) => void
+  readout: DirectionReadout | 'leftArm' | 'leftBlink'
+  sign?: number
+}> = [
+  { name: 'turns their head right', move: ({ face }) => { face[1].x = 0.3 }, readout: 'headForwardX', sign: -1 },
+  { name: 'turns their body right (world landmarks)', move: (landmarks) => {
+    landmarks.pose = structuredClone(T_POSE.landmarks)
+    landmarks.poseWorld = structuredClone(T_POSE.landmarks)
+    landmarks.poseWorld[11] = { x: 0.16, y: 0, z: -0.1 }
+    landmarks.poseWorld[12] = { x: -0.16, y: 0, z: 0.1 }
+  }, readout: 'spineForwardX', sign: -1 },
+  { name: 'turns their body right (normalized fallback)', move: (landmarks) => {
+    landmarks.pose = structuredClone(T_POSE.landmarks)
+    landmarks.pose[11].z = -0.05
+    landmarks.pose[12].z = 0.05
+  }, readout: 'spineForwardX', sign: -1 },
+  { name: 'leans right', move: (landmarks) => {
+    landmarks.pose = structuredClone(T_POSE.landmarks)
+    landmarks.pose[11].y = 0.25
+    landmarks.pose[12].y = 0.35
+  }, readout: 'spineUpX', sign: -1 },
+  { name: 'tilts their head right', move: ({ face }) => {
+    face[33].y = 0.47
+    face[263].y = 0.37
+  }, readout: 'headUpX', sign: -1 },
+  { name: 'looks right', move: ({ face }) => {
+    face[468].x -= 0.03
+    face[473].x -= 0.03
+  }, readout: 'eyesForwardX', sign: -1 },
+  { name: 'tilts their head back', move: ({ face }) => {
+    face[10].z = 0.03
+    face[152].z = -0.02
+  }, readout: 'headForwardY', sign: 1 },
+  { name: 'looks up', move: ({ face }) => {
+    face[468].y -= 0.01
+    face[473].y -= 0.01
+  }, readout: 'eyesForwardY', sign: 1 },
+  { name: 'raises their left arm', move: (landmarks) => {
+    landmarks.pose = structuredClone(LEFT_ARM_UP.landmarks)
+  }, readout: 'leftArm' },
+  { name: 'closes their left eye', move: ({ face }) => { face[374].y = face[386].y }, readout: 'leftBlink' },
+]
+
+describe.each(['0', '1'] as const)('Same-side landmarks → world space: VRM %s.x', (metaVersion) => {
+  it.each(SAME_SIDE_MOTIONS)('user $name', ({ move, readout, sign }) => {
+    const { vrm, scene, raw } = buildProceduralVRM(metaVersion)
+    const landmarks = neutralLandmarks()
+    move(landmarks)
+    const bridge = new TrackingBridge(vrm, { smoothing: 0 })
+
+    bridge.update(solveHolistic(landmarks))
+    vrm.humanoid.update()
+    scene.updateMatrixWorld(true)
+
+    const forward = (bone: THREE.Object3D) => new THREE.Vector3(0, 0, metaVersion === '0' ? -1 : 1)
+      .applyQuaternion(bone.getWorldQuaternion(new THREE.Quaternion()))
+    const up = (bone: THREE.Object3D) => new THREE.Vector3(0, 1, 0)
+      .applyQuaternion(bone.getWorldQuaternion(new THREE.Quaternion()))
+    const directions: Record<DirectionReadout, number[]> = {
+      headForwardX: [forward(raw.head).x],
+      spineForwardX: [forward(raw.spine).x],
+      spineUpX: [up(raw.spine).x],
+      headUpX: [up(raw.head).x],
+      eyesForwardX: [forward(raw.leftEye).x, forward(raw.rightEye).x],
+      headForwardY: [forward(raw.head).y],
+      eyesForwardY: [forward(raw.leftEye).y, forward(raw.rightEye).y],
+    }
+    if (readout === 'leftArm') {
+      const left = raw.leftHand.getWorldPosition(new THREE.Vector3())
+      const right = raw.rightHand.getWorldPosition(new THREE.Vector3())
+      expect(left.x).toBeGreaterThan(0)
+      expect(left.y).toBeGreaterThan(raw.leftUpperArm.getWorldPosition(new THREE.Vector3()).y)
+      expect(right.y).toBeLessThan(raw.rightUpperArm.getWorldPosition(new THREE.Vector3()).y)
+    } else if (readout === 'leftBlink') {
+      expect(vrm.expressionManager!.getValue('blinkLeft')).toBe(1)
+      expect(vrm.expressionManager!.getValue('blinkRight')).toBe(0)
+    } else {
+      for (const component of directions[readout]) expect(component * sign!).toBeGreaterThan(0.1)
+    }
+    bridge.dispose()
+  })
 })

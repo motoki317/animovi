@@ -14,12 +14,7 @@ The code documents the coordinate frames and the sign of each angle. Start at `t
 
 ## Left and right
 
-The avatar does not use one left-right convention:
-
-- **Same side**: arms, head roll, and horizontal gaze. When the user raises their left arm, the avatar raises its left arm.
-- **Mirrored**: head yaw, spine yaw, spine roll, and blinks. When the user turns their head to their left, the avatar turns its head to its right. When the user closes their left eye, the avatar closes its right eye.
-
-As a result, when the user turns their head and eyes to the same side, the avatar turns them to opposite sides. The author has not chosen one convention yet. Ask the author before you change any of these signs.
+The author chose to have the avatar follow the user's anatomical side for arms, hands, head, spine, gaze, and blinks. The avatar faces the viewer, so its left hand appears on the screen's right.
 
 ## Performance profile
 

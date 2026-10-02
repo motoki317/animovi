@@ -16,6 +16,7 @@ export interface ArmResult {
 }
 
 export interface PoseResult {
+  /** Solver-space bone rotation in radians: pitch about X, yaw about Y, roll about Z, with ZYX order. See toSolverSpace. */
   spine: {
     pitch: number
     yaw: number
@@ -25,7 +26,6 @@ export interface PoseResult {
   rightArm: ArmResult | null
 }
 
-// MediaPipe Pose landmark indices
 const LEFT_SHOULDER = 11
 const RIGHT_SHOULDER = 12
 const LEFT_ELBOW = 13
@@ -119,26 +119,27 @@ export function solvePose(
     return null
   }
 
-  // Positive yaw: the body turns to the subject's right, so the right shoulder
-  // moves away from the camera (larger z). Facing the camera, the shoulder line
-  // runs along -X of MediaPipe's world landmarks, where atan2(Δz, -Δx) reads 0,
-  // far from its ±180° branch cut. The angle does not depend on shoulder width.
+  // Positive bone yaw turns the avatar to its left, so a turn to the subject's
+  // right needs negative yaw. That turn moves the right shoulder away from
+  // the camera (larger z). When the subject faces the camera, the vector from
+  // their left shoulder to their right shoulder points along MediaPipe world -X.
+  // atan2(Δz, -Δx) then reads 0, far from its ±180° branch cut.
+  // Shoulder spacing does not affect the angle.
   const lShoulderW = worldLandmarks?.[LEFT_SHOULDER]
   const rShoulderW = worldLandmarks?.[RIGHT_SHOULDER]
   let spineYaw: number
   if (lShoulderW && rShoulderW) {
     const dz = rShoulderW.z - lShoulderW.z
     const dx = rShoulderW.x - lShoulderW.x
-    spineYaw = clamp(Math.atan2(dz, -dx) * SPINE_YAW_GAIN, -SPINE_YAW_CLAMP, SPINE_YAW_CLAMP)
+    spineYaw = clamp(-Math.atan2(dz, -dx) * SPINE_YAW_GAIN, -SPINE_YAW_CLAMP, SPINE_YAW_CLAMP)
   } else {
-    // Callers without world landmarks (tests and fixtures) get the older
-    // normalized-z estimate.
-    spineYaw = (rightShoulder.z - leftShoulder.z) * 3
+    // Callers without world landmarks (tests and fixtures) use normalized z.
+    spineYaw = (leftShoulder.z - rightShoulder.z) * 3
   }
 
-  // Positive roll: the right shoulder sits lower in the image (larger y), so the
-  // subject leans to their right.
-  const spineRoll = (rightShoulder.y - leftShoulder.y) * 2
+  // A lean to the subject's right lowers the right shoulder in the image
+  // (larger y) and needs negative bone roll in solver space.
+  const spineRoll = (leftShoulder.y - rightShoulder.y) * 2
 
   // Pitch stays 0. The shoulder-to-hip z offset gave a constant bias that bowed
   // the avatar while the user stood straight.
