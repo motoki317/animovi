@@ -1,9 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { solvePose, SPINE_YAW_GAIN, SPINE_YAW_CLAMP, type PoseLandmarks } from './pose-solver'
 
-// Metric world pose landmarks for spine yaw. Forward pose: shoulder line along
-// world -X (right shoulder 12 at smaller x than left shoulder 11), depth z ~0 —
-// the convention measured from real footage.
+// World landmarks for spine yaw. Facing the camera in real footage, the right
+// shoulder (12) has a smaller x than the left (11), at about equal depth.
 function createWorldShoulders(
   left: { x: number; y: number; z: number },
   right: { x: number; y: number; z: number },
@@ -15,14 +14,13 @@ function createWorldShoulders(
   return lm
 }
 
-// MediaPipe Pose Landmarker returns 33 landmarks
-// Key landmarks: shoulders (11, 12), elbows (13, 14), wrists (15, 16), hips (23, 24)
+// MediaPipe Pose Landmarker returns 33 landmarks: shoulders 11 and 12, elbows 13
+// and 14, wrists 15 and 16, hips 23 and 24.
 function createNeutralPoseLandmarks(): PoseLandmarks {
   const landmarks: PoseLandmarks = []
   for (let i = 0; i < 33; i++) {
     landmarks.push({ x: 0.5, y: 0.5, z: 0, visibility: 1.0 })
   }
-  // Neutral standing pose
   landmarks[11] = { x: 0.4, y: 0.3, z: 0, visibility: 1.0 } // left shoulder
   landmarks[12] = { x: 0.6, y: 0.3, z: 0, visibility: 1.0 } // right shoulder
   landmarks[13] = { x: 0.35, y: 0.5, z: 0, visibility: 1.0 } // left elbow
@@ -54,9 +52,9 @@ describe('PoseSolver', () => {
 
   it('should detect positive spine yaw when body turns right', () => {
     const landmarks = createNeutralPoseLandmarks()
-    // Right shoulder forward (larger z), left shoulder back
-    landmarks[11] = { x: 0.4, y: 0.3, z: -0.05, visibility: 1.0 } // left shoulder back
-    landmarks[12] = { x: 0.6, y: 0.3, z: 0.05, visibility: 1.0 } // right shoulder forward
+    // MediaPipe z grows away from the camera, so the right shoulder moved back.
+    landmarks[11] = { x: 0.4, y: 0.3, z: -0.05, visibility: 1.0 }
+    landmarks[12] = { x: 0.6, y: 0.3, z: 0.05, visibility: 1.0 }
 
     const result = solvePose(landmarks)
 
@@ -75,7 +73,7 @@ describe('PoseSolver', () => {
 
   it('derives spine yaw from the world shoulder-line angle, attenuated by SPINE_YAW_GAIN', () => {
     const normalized = createNeutralPoseLandmarks()
-    // Right shoulder forward (+z), left back (-z): body turned to the right.
+    // Right shoulder back (+z), left forward (-z): the body turns to the subject's right.
     const world = createWorldShoulders({ x: 0.16, y: 0, z: -0.1 }, { x: -0.16, y: 0, z: 0.1 })
 
     const result = solvePose(normalized, world)
@@ -121,7 +119,6 @@ describe('PoseSolver', () => {
 
   it('should return null when key landmarks have low visibility', () => {
     const landmarks = createNeutralPoseLandmarks()
-    // Set shoulders to low visibility (below threshold)
     landmarks[11] = { x: 0.4, y: 0.3, z: 0, visibility: 0.3 }
     landmarks[12] = { x: 0.6, y: 0.3, z: 0, visibility: 0.3 }
 
@@ -171,24 +168,20 @@ describe('PoseSolver', () => {
     expect(result).not.toBeNull()
     expect(result!.leftArm).not.toBeNull()
     expect(result!.rightArm).not.toBeNull()
-    // In VRM bone space, for the avatar's arms to appear pointing toward the viewer
-    // (after PI scene rotation), bones must rotate toward model's -Z direction.
-    // Left arm: T-pose {-1,0,0} → {0,0,-1} requires negative Y rotation
+    // In solver space the avatar faces -Z. Turning the left arm from -X to -Z is a
+    // negative Y rotation.
     expect(result!.leftArm!.shoulder.y).toBeLessThan(-0.3)
-    // Right arm: T-pose {+1,0,0} → {0,0,-1} requires positive Y rotation
     expect(result!.rightArm!.shoulder.y).toBeGreaterThan(0.3)
   })
 
-  it('should still compute arm when only wrist is low visibility but elbow is visible', () => {
+  it('returns a null arm when only the wrist is below the visibility threshold', () => {
     const landmarks = createNeutralPoseLandmarks()
-    // Left wrist not visible, but shoulder and elbow are fine
+    // Left wrist not visible, shoulder and elbow visible
     landmarks[15] = { x: 0.3, y: 0.7, z: 0, visibility: 0.2 }
 
     const result = solvePose(landmarks)
 
     expect(result).not.toBeNull()
-    // When only wrist is missing, we can still compute shoulder rotation from elbow
-    // The arm result should still be null since we can't reliably compute elbow rotation
     expect(result!.leftArm).toBeNull()
   })
 })

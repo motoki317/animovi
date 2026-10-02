@@ -1,16 +1,13 @@
-/**
- * Kalman Filter for smoothing motion tracking data.
- * Uses simplified 1D Kalman filter (exponential smoothing).
- */
-export interface KalmanFilterOptions {
+export interface ExponentialSmootherOptions {
   responsiveness?: number
 }
 
-export class KalmanFilter {
+export class ExponentialSmoother {
   private estimate: number | null = null
-  private readonly responsiveness: number
+  /** The fraction of the gap to each new sample that the estimate closes, from 0 to 1. */
+  responsiveness: number
 
-  constructor(options: KalmanFilterOptions = {}) {
+  constructor(options: ExponentialSmootherOptions = {}) {
     this.responsiveness = options.responsiveness ?? 0.5
   }
 
@@ -22,9 +19,5 @@ export class KalmanFilter {
 
     this.estimate = this.estimate + this.responsiveness * (value - this.estimate)
     return this.estimate
-  }
-
-  reset(): void {
-    this.estimate = null
   }
 }

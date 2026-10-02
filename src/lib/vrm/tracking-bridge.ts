@@ -1,25 +1,25 @@
-/**
- * TrackingBridge - Connects tracking results to VRM avatar animation.
- * Applies solver output to VRM bones and expressions with optional smoothing.
- */
-
 import type { VRM } from '@pixiv/three-vrm'
 import type { HolisticResult } from '../solver/holistic-solver'
 import type { FaceResult } from '../solver/face-solver'
 import type { PoseResult, ArmResult } from '../solver/pose-solver'
 import type { HandResult, WristFrame } from '../solver/hand-solver'
-import { eulerZYXToQuat, quatMul, type Quat } from '../solver/hand-solver'
-import { rotationFromTwoPairs, quaternionToEulerZYX } from '../math/two-bone-ik'
-import { KalmanFilter } from '../math/kalman-filter'
+import {
+  eulerZYXToQuat,
+  quatMul,
+  quaternionToEulerZYX,
+  rotationFromTwoPairs,
+  type Quat,
+} from '../math/quaternion'
+import { ExponentialSmoother } from '../math/exponential-smoother'
 
 export interface TrackingBridgeOptions {
-  /** Enable face tracking (default: true) */
+  /** Default: true. */
   faceTracking?: boolean
-  /** Enable pose tracking (default: true) */
+  /** Default: true. */
   poseTracking?: boolean
-  /** Enable hand tracking (default: true) */
+  /** Default: true. */
   handTracking?: boolean
-  /** Smoothing factor 0-1 (default: 0.5) */
+  /** 0 (no smoothing) to 1. Filter responsiveness is 1 - smoothing, at least 0.1. Default: 0.5. */
   smoothing?: number
 }
 
@@ -30,14 +30,13 @@ interface EulerAngles {
 }
 
 /**
- * Snapshot of the rotation actually written to a VRM bone in the last update.
- * Captured so the stick-figure debug overlay can compare "what was applied"
- * against the raw MediaPipe input — pinpointing whether arm-rotation shortfalls
- * live in the solver/clamp/smoothing or upstream in tracking.
+ * The rotation that the last update() wrote to one VRM bone. The stick-figure
+ * debug overlay compares `raw` with `applied` to separate solver errors from
+ * smoothing and sign errors.
  *
- * `applied` is the post-smoothing, post-boneSign value written to bone.rotation
- * (in the bone's local frame, ZYX order). `raw` is the input the bridge received
- * for that bone before smoothing — useful for isolating the smoothing contribution.
+ * `applied` is the value written to bone.rotation: bone-local, ZYX order, after
+ * smoothing and boneSign. `raw` is the solver output for that bone, before both.
+ * For finger bones, `raw` holds the unitless curl in x and spread in z.
  */
 export interface AppliedRotation {
   applied: { x: number; y: number; z: number }
@@ -46,8 +45,10 @@ export interface AppliedRotation {
 
 export type AppliedRotations = Record<string, AppliedRotation>
 
-type FilterMap = Map<string, KalmanFilter>
+type FilterMap = Map<string, ExponentialSmoother>
 
+// Eye and mouth values ignore the smoothing setting, so blinks, gaze, and
+// mouth shapes stay responsive while the head and body stay smooth.
 const FAST_RESPONSIVENESS = 0.9
 
 const FAST_RESPONSE_KEYS = new Set([
@@ -59,6 +60,15 @@ const FAST_RESPONSE_KEYS = new Set([
   'blendshape_happy',
 ])
 
+// Smoothing 1 would give responsiveness 0, which freezes every bone.
+const MIN_RESPONSIVENESS = 0.1
+
+// Upper-arm roll for the arms-down pose: 72° below horizontal. Before boneSign,
+// positive roll lowers the left arm and negative roll lowers the right arm.
+const ARMS_DOWN_ROLL = Math.PI / 2.5
+
+const FINGER_NAMES = ['thumb', 'index', 'middle', 'ring', 'pinky'] as const
+
 export class TrackingBridge {
   private vrm: VRM
   private options: Required<TrackingBridgeOptions>
@@ -68,12 +78,14 @@ export class TrackingBridge {
   private prevLeftHandActive = false
   private prevRightHandActive = false
   private appliedRotations: AppliedRotations = {}
-  // Bone rotation sign correction for VRM 1.x.
-  // VRM 0.x is loaded with a PI scene rotation (VRMUtils.rotateVRM0), so the bone's
-  // effective world rotation is conj(R, rotY(PI)) — equivalent to flipping the sign
-  // of X and Z components of R. The solver and hardcoded poses were calibrated for
-  // that convention. For VRM 1.x (no scene rotation, but rest-pose bone axes are
-  // permuted), the effective world rotation is just R, so we must flip X/Z to match.
+  // Normalized bones rest with identity rotations in the VRM file's own frame,
+  // the glTF scene root. VRMUtils.rotateVRM0 turns a VRM 0.x scene by π about Y,
+  // so a bone rotation R acts in three.js world space with its X and Z
+  // components negated. The solver and the fixed poses use that VRM 0.x
+  // convention, so VRM 1.x (no scene rotation) negates X and Z here.
+  // tracking-bridge.integration.test.ts shows that both versions then put the
+  // hands at the same world positions. If an avatar arm points away from the
+  // user's arm, the cause lies elsewhere, so do not change this sign.
   private boneSign: 1 | -1
 
   constructor(vrm: VRM, options: TrackingBridgeOptions = {}) {
@@ -87,17 +99,11 @@ export class TrackingBridge {
     this.boneSign = vrm.meta?.metaVersion === '1' ? -1 : 1
   }
 
-  /**
-   * Snapshot of the bone rotations applied during the most recent update().
-   * Returned by reference for efficiency; do not mutate.
-   */
+  /** Rotations written by the last update(). Callers share the object, so they must not mutate it. */
   getAppliedRotations(): AppliedRotations {
     return this.appliedRotations
   }
 
-  /**
-   * Update VRM with tracking results
-   */
   update(results: HolisticResult): void {
     this.appliedRotations = {}
 
@@ -118,13 +124,17 @@ export class TrackingBridge {
       } else {
         if (this.prevPoseActive) {
           this.prevPoseActive = false
-          this.resetFiltersWithPrefix('spine_', 'leftUpperArm', 'rightUpperArm', 'leftLowerArm', 'rightLowerArm')
+          this.resetFiltersWithPrefix('spine_')
         }
-        // Apply natural "arms down" pose when tracking not available
+        // The arm filters stay, so a dropped frame eases the arms toward the
+        // default pose instead of snapping them there.
         this.applyDefaultArmPose()
       }
     }
 
+    // The Hand Tracking checkbox in the settings panel starts unchecked
+    // (handTrackingEnabled in settings-store.ts). If the fingers do not move,
+    // check it before the rotation math.
     if (this.options.handTracking) {
       if (results.leftHand) {
         this.prevLeftHandActive = true
@@ -134,7 +144,7 @@ export class TrackingBridge {
         }
       } else if (this.prevLeftHandActive) {
         this.prevLeftHandActive = false
-        this.resetFiltersWithPrefix('left')
+        this.resetHandFilters('left')
       }
       if (results.rightHand) {
         this.prevRightHandActive = true
@@ -144,53 +154,33 @@ export class TrackingBridge {
         }
       } else if (this.prevRightHandActive) {
         this.prevRightHandActive = false
-        this.resetFiltersWithPrefix('right')
+        this.resetHandFilters('right')
       }
     }
   }
 
-  /**
-   * Apply a natural "arms down" pose (relaxed standing position)
-   */
   private applyDefaultArmPose(): void {
-    // Arms naturally hang down from T-pose
-    // Left arm: positive Z rotation lowers it
-    // Right arm: negative Z rotation lowers it
-    const armsDownAngle = Math.PI / 2.5 // About 72 degrees down from horizontal
-
-    this.applyArmBone('leftUpperArm', {
-      pitch: 0,
-      yaw: 0,
-      roll: armsDownAngle,
-    })
-    this.applyArmBone('rightUpperArm', {
-      pitch: 0,
-      yaw: 0,
-      roll: -armsDownAngle,
-    })
-    // Keep lower arms straight
+    this.applyArmBone('leftUpperArm', { pitch: 0, yaw: 0, roll: ARMS_DOWN_ROLL })
+    this.applyArmBone('rightUpperArm', { pitch: 0, yaw: 0, roll: -ARMS_DOWN_ROLL })
     this.applyArmBone('leftLowerArm', { pitch: 0, yaw: 0, roll: 0 })
     this.applyArmBone('rightLowerArm', { pitch: 0, yaw: 0, roll: 0 })
   }
 
-  /**
-   * Update options dynamically
-   */
   setOptions(options: Partial<TrackingBridgeOptions>): void {
-    this.options = { ...this.options, ...options }
+    const { smoothing, ...toggles } = options
+    this.options = { ...this.options, ...toggles }
+    if (smoothing !== undefined) this.setSmoothing(smoothing)
   }
 
-  /**
-   * Update smoothing factor
-   */
+  /** Existing filters keep their state, so the bones do not jump. */
   setSmoothing(smoothing: number): void {
     this.options.smoothing = Math.max(0, Math.min(1, smoothing))
-    // Clear filters to recreate with new responsiveness
-    this.filters.clear()
+    for (const [key, filter] of this.filters) {
+      filter.responsiveness = this.responsivenessFor(key)
+    }
   }
 
   private applyFaceTracking(face: FaceResult): void {
-    // Apply head rotation
     const headBone = this.vrm.humanoid.getNormalizedBoneNode('head')
     if (headBone) {
       const smoothedRotation = this.smoothEuler('head', face.head)
@@ -204,9 +194,11 @@ export class TrackingBridge {
       }
     }
 
-    // Apply eye gaze to eye bones
-    const gazeYaw = this.smoothValue('gazeX', face.eyes.gazeX) * (Math.PI / 6) // max ~30 degrees
-    const gazePitch = this.smoothValue('gazeY', -face.eyes.gazeY) * (Math.PI / 6) // invert: VRM +X = down
+    // Gaze values are in [-1, 1], so the eyes turn at most 30°. Before boneSign,
+    // a positive pitch turns the eyes up in three.js world space, and gazeY > 0
+    // means up.
+    const gazeYaw = this.smoothValue('gazeX', face.eyes.gazeX) * (Math.PI / 6)
+    const gazePitch = this.smoothValue('gazeY', face.eyes.gazeY) * (Math.PI / 6)
     for (const eyeName of ['leftEye', 'rightEye'] as const) {
       const eyeBone = this.vrm.humanoid.getNormalizedBoneNode(eyeName)
       if (eyeBone) {
@@ -214,17 +206,15 @@ export class TrackingBridge {
       }
     }
 
-    // Apply blendshapes
     if (this.vrm.expressionManager) {
       this.applyBlendShape('blinkLeft', face.eyes.leftBlink)
       this.applyBlendShape('blinkRight', face.eyes.rightBlink)
-      this.applyBlendShape('aa', face.mouth.open) // VRM uses 'aa' for mouth open
-      this.applyBlendShape('happy', face.mouth.smile) // VRM uses 'happy' for smile
+      this.applyBlendShape('aa', face.mouth.open)
+      this.applyBlendShape('happy', face.mouth.smile)
     }
   }
 
   private applyPoseTracking(pose: PoseResult): void {
-    // Apply spine rotation
     const spineBone = this.vrm.humanoid.getNormalizedBoneNode('spine')
     if (spineBone) {
       const smoothedRotation = this.smoothEuler('spine', pose.spine)
@@ -238,9 +228,6 @@ export class TrackingBridge {
       }
     }
 
-    // Apply arm rotations (fall back to default pose if arm not visible)
-    const armsDownAngle = Math.PI / 2.5
-
     if (pose.leftArm) {
       this.applyArmBone('leftUpperArm', {
         pitch: pose.leftArm.shoulder.x,
@@ -253,7 +240,7 @@ export class TrackingBridge {
         roll: pose.leftArm.elbow.z,
       })
     } else {
-      this.applyArmBone('leftUpperArm', { pitch: 0, yaw: 0, roll: armsDownAngle })
+      this.applyArmBone('leftUpperArm', { pitch: 0, yaw: 0, roll: ARMS_DOWN_ROLL })
       this.applyArmBone('leftLowerArm', { pitch: 0, yaw: 0, roll: 0 })
     }
 
@@ -269,7 +256,7 @@ export class TrackingBridge {
         roll: pose.rightArm.elbow.z,
       })
     } else {
-      this.applyArmBone('rightUpperArm', { pitch: 0, yaw: 0, roll: -armsDownAngle })
+      this.applyArmBone('rightUpperArm', { pitch: 0, yaw: 0, roll: -ARMS_DOWN_ROLL })
       this.applyArmBone('rightLowerArm', { pitch: 0, yaw: 0, roll: 0 })
     }
   }
@@ -290,38 +277,28 @@ export class TrackingBridge {
   }
 
   private applyHandTracking(side: 'left' | 'right', hand: HandResult): void {
-    const prefix = side === 'left' ? 'left' : 'right'
-    const fingerNames = ['thumb', 'index', 'middle', 'ring', 'pinky'] as const
-
-    // In three-vrm's normalized rig, finger bones extend along ±X (verified at
-    // startup via logFingerBoneAvailability). Rotating around bone-local X is a
-    // no-op — the bone IS along X. Curl/spread must rotate around the perpendicular
-    // axes:
-    //   curl   → Z (bends finger toward palm)
-    //   spread → Y (lateral splay in the palm plane)
-    // sideSign: left fingers extend in +X, right in -X; same curl angle requires
-    // opposite Z sign across hands. The existing boneSign (VRM-version
-    // compensator for arm bones) happens to give the correct world-direction
-    // mapping for this VRM's finger rest pose; combined with sideSign it
-    // produces a palms-down curl.
-    //
-    // Anatomical curl distributes across three joints (proximal, intermediate,
-    // distal) rather than concentrating on the proximal. Approximate weights
-    // chosen so curl=1 produces a roughly natural fist (~140° total bend).
+    // Normalized finger bones extend along their local X axis, so a rotation
+    // about X only twists the finger. Curl rotates about Z and spread about Y.
+    // In three.js world space, left fingers extend toward +X and right fingers
+    // toward -X, so the same curl needs opposite signs (sideSign). boneSign is
+    // the VRM version correction that the arms also use. Positive curl bends the
+    // fingers toward world -Y.
     const sideSign = side === 'left' ? 1 : -1
+    // Curl spreads over three joints, so a full curl makes a fist instead of
+    // bending only the knuckle.
     const jointWeights = [
       { suffix: 'Proximal', curlFactor: 0.5, spreadFactor: 1 },
       { suffix: 'Intermediate', curlFactor: 0.5, spreadFactor: 0 },
       { suffix: 'Distal', curlFactor: 0.4, spreadFactor: 0 },
     ] as const
 
-    for (const finger of fingerNames) {
+    for (const finger of FINGER_NAMES) {
       const fingerData = hand[finger]
       if (!fingerData) continue
 
       const capName = finger.charAt(0).toUpperCase() + finger.slice(1)
       for (const { suffix, curlFactor, spreadFactor } of jointWeights) {
-        const boneName = `${prefix}${capName}${suffix}`
+        const boneName = `${side}${capName}${suffix}`
         const bone = this.vrm.humanoid.getNormalizedBoneNode(boneName as never)
         if (!bone) continue
         const curl = this.smoothValue(`${boneName}Curl`, fingerData.curl)
@@ -338,24 +315,10 @@ export class TrackingBridge {
   }
 
   /**
-   * Apply wrist rotation by composing the hand's detected world frame against
-   * the arm chain (shoulder + elbow Eulers).
-   *
-   * Algorithm:
-   *   1. Bone-local rest axes in SOLVER basis at T-pose:
-   *      - handAxis: ∓X (LEFT → -X, RIGHT → +X) — bone's extending direction.
-   *      - palmNormal: -Y (palms-down rest, matching this VRM rig's convention).
-   *   2. R_target = rotationFromTwoPairs(rest axes, detected axes) — the rotation
-   *      in solver basis that maps the bone-local rest hand frame to the
-   *      detected hand frame.
-   *   3. R_handLocal = R_chain⁻¹ · R_target — the bone's LOCAL rotation in solver
-   *      convention, given the parent (lowerArm) world rotation R_chain.
-   *   4. Convert R_handLocal to ZYX Euler; bridge applies boneSign on X/Z just
-   *      like the arm bones.
-   *
-   * This uses TWO orientation axes from the hand (axis + palm normal), so it
-   * stays well-defined even when the palm normal aligns with the forearm — the
-   * case where the previous single-axis approach went degenerate.
+   * All vectors are in solver space (see toSolverSpace). R_target maps the
+   * T-pose hand frame (hand axis and palm normal) onto the detected one. The
+   * hand bone's local rotation is R_chain⁻¹ · R_target, where
+   * R_chain = quat(shoulder) · quat(elbow).
    */
   private applyWristTracking(
     side: 'left' | 'right',
@@ -369,6 +332,8 @@ export class TrackingBridge {
     const restHandAxis = side === 'left'
       ? { x: -1, y: 0, z: 0 }
       : { x: 1, y: 0, z: 0 }
+    // Palms down at T-pose matched the one test model. A model with palms
+    // forward or inward at rest needs a different axis here.
     const restPalmNormal = { x: 0, y: -1, z: 0 }
 
     const qTarget = rotationFromTwoPairs(
@@ -418,16 +383,17 @@ export class TrackingBridge {
   private smoothValue(key: string, value: number): number {
     let filter = this.filters.get(key)
     if (!filter) {
-      const responsiveness = FAST_RESPONSE_KEYS.has(key)
-        ? FAST_RESPONSIVENESS
-        : 1 - this.options.smoothing
-      filter = new KalmanFilter({ responsiveness })
+      filter = new ExponentialSmoother({ responsiveness: this.responsivenessFor(key) })
       this.filters.set(key, filter)
     }
     return filter.update(value)
   }
 
-  /** Reset all Kalman filters whose key starts with any of the given prefixes */
+  private responsivenessFor(key: string): number {
+    if (FAST_RESPONSE_KEYS.has(key)) return FAST_RESPONSIVENESS
+    return Math.max(MIN_RESPONSIVENESS, 1 - this.options.smoothing)
+  }
+
   private resetFiltersWithPrefix(...prefixes: string[]): void {
     for (const key of this.filters.keys()) {
       if (prefixes.some(p => key.startsWith(p))) {
@@ -436,9 +402,14 @@ export class TrackingBridge {
     }
   }
 
-  /**
-   * Dispose resources
-   */
+  // A bare 'left' prefix also matches the leftUpperArm and leftLowerArm filters.
+  private resetHandFilters(side: 'left' | 'right'): void {
+    this.resetFiltersWithPrefix(
+      `${side}Hand_`,
+      ...FINGER_NAMES.map((finger) => side + finger.charAt(0).toUpperCase() + finger.slice(1)),
+    )
+  }
+
   dispose(): void {
     this.filters.clear()
   }
