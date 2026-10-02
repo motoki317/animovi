@@ -1,54 +1,75 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { registerServiceWorker } from './register-sw'
 
+function stubServiceWorker(container: Partial<ServiceWorkerContainer> | undefined) {
+  if (container === undefined) {
+    Reflect.deleteProperty(navigator, 'serviceWorker')
+    return
+  }
+  Object.defineProperty(navigator, 'serviceWorker', { value: container, configurable: true })
+}
+
 describe('registerServiceWorker', () => {
-  beforeEach(() => {
-    vi.restoreAllMocks()
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    stubServiceWorker(undefined)
   })
 
-  it('should return null when serviceWorker not supported', async () => {
-    // Remove serviceWorker from navigator
-    const original = navigator.serviceWorker
-    Object.defineProperty(navigator, 'serviceWorker', {
-      value: undefined,
-      writable: true,
-      configurable: true,
+  it('returns null without service worker support', async () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    stubServiceWorker(undefined)
+
+    expect('serviceWorker' in navigator).toBe(false)
+    expect(await registerServiceWorker()).toBeNull()
+  })
+
+  describe('in production', () => {
+    it('registers /sw.js', async () => {
+      vi.stubEnv('NODE_ENV', 'production')
+      const registration = { scope: '/' } as ServiceWorkerRegistration
+      const register = vi.fn().mockResolvedValue(registration)
+      stubServiceWorker({ register })
+
+      expect(await registerServiceWorker()).toBe(registration)
+      expect(register).toHaveBeenCalledWith('/sw.js')
     })
 
-    const result = await registerServiceWorker()
-    expect(result).toBeNull()
+    it('returns null when registration fails', async () => {
+      vi.stubEnv('NODE_ENV', 'production')
+      stubServiceWorker({ register: vi.fn().mockRejectedValue(new Error('failed')) })
 
-    Object.defineProperty(navigator, 'serviceWorker', {
-      value: original,
-      writable: true,
-      configurable: true,
+      expect(await registerServiceWorker()).toBeNull()
     })
   })
 
-  it('should register service worker at /sw.js', async () => {
-    const mockRegistration = { scope: '/' }
-    const mockRegister = vi.fn().mockResolvedValue(mockRegistration)
-    Object.defineProperty(navigator, 'serviceWorker', {
-      value: { register: mockRegister },
-      writable: true,
-      configurable: true,
+  describe('in development', () => {
+    it('unregisters existing service workers and does not register', async () => {
+      vi.stubEnv('NODE_ENV', 'development')
+      const unregisterA = vi.fn().mockResolvedValue(true)
+      const unregisterB = vi.fn().mockResolvedValue(true)
+      const register = vi.fn()
+      stubServiceWorker({
+        register,
+        getRegistrations: vi.fn().mockResolvedValue([
+          { unregister: unregisterA },
+          { unregister: unregisterB },
+        ]),
+      })
+
+      expect(await registerServiceWorker()).toBeNull()
+      expect(unregisterA).toHaveBeenCalled()
+      expect(unregisterB).toHaveBeenCalled()
+      expect(register).not.toHaveBeenCalled()
     })
 
-    const result = await registerServiceWorker()
+    it('returns null when unregistering fails', async () => {
+      vi.stubEnv('NODE_ENV', 'development')
+      stubServiceWorker({
+        register: vi.fn(),
+        getRegistrations: vi.fn().mockRejectedValue(new Error('SecurityError')),
+      })
 
-    expect(mockRegister).toHaveBeenCalledWith('/sw.js')
-    expect(result).toBe(mockRegistration)
-  })
-
-  it('should return null when registration fails', async () => {
-    const mockRegister = vi.fn().mockRejectedValue(new Error('failed'))
-    Object.defineProperty(navigator, 'serviceWorker', {
-      value: { register: mockRegister },
-      writable: true,
-      configurable: true,
+      expect(await registerServiceWorker()).toBeNull()
     })
-
-    const result = await registerServiceWorker()
-    expect(result).toBeNull()
   })
 })
