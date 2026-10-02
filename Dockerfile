@@ -1,12 +1,5 @@
 FROM node:24-alpine AS base
 
-# --- Dependencies ---
-FROM base AS deps
-WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
-
-# --- Build ---
 FROM base AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -14,7 +7,6 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-# --- Production ---
 FROM base AS runner
 WORKDIR /app
 ENV NODE_ENV=production

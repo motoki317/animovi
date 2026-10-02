@@ -10,3 +10,5 @@ Dockerfile
 .dockerignore
 playwright.config.ts
 playwright-report
+# Local perf-harness video. The runner stage copies all of public/.
+public/__perf_footage.*
